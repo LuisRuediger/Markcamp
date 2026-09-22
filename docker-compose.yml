@@ -1,0 +1,19 @@
+services:
+  db:
+    image: postgres:17
+    container_name: markcamp_db
+    environment:
+      POSTGRES_DB: markcamp
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - markcamp-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d markcamp"]
+      interval: 5s
+      retries: 5
+
+volumes:
+  markcamp-data:
