@@ -1,4 +1,4 @@
-# ADR 0001 — Tenancy model
+# ADR 0001 — Markers belong to projects
 
 - **Status:** Accepted
 - **Date:** 2026-09-05
