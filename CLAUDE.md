@@ -1,6 +1,8 @@
 # MarkCamp
 
-MarkCamp is an offline-first app for marking points in the field (GPS markers organized into projects), built for places with no cellular signal.
+MarkCamp is an offline-first app for stingless beekeepers (meliponiculture) to track bait hives in the field, organized into projects, built for places with no cellular signal.
+
+Current scope is the **bait hive MVP**. Colonies, splits and anything else are out of scope until explicitly brought in. The core entity is `bait`, not a generic marker (see ADR 0003).
 
 This is a **learning project** run like a real product. The goal is to understand every architectural decision, not to ship fast. The developer is learning backend architecture, security, logging and deployment through this codebase.
 
