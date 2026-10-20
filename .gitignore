@@ -14,3 +14,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Patches
+# Patch files are local scratch (git diff/format-patch output) and were committed by mistake once.
+*.patch
