@@ -1,7 +1,7 @@
 # ADR 0001 — Markers belong to projects
 
 - **Status:** Accepted. Terminology amended by [ADR 0003](0003-bait-replaces-generic-marker.md):
-  "marker" now reads as "bait"; the ownership decision and its rules are unchanged.
+  "marker" now reads as "bait site" (ADR 0003, refined by ADR 0005); the ownership decision and its rules are unchanged.
 - **Date:** 2026-09-05
 - **Deciders:** Luis
 

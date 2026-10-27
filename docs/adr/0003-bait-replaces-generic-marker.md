@@ -1,6 +1,6 @@
 # ADR 0003 — Bait replaces the generic marker as the core entity
 
-- **Status:** Accepted
+- **Status:** Accepted. Entity name refined by [ADR 0005](0005-bait-site-history-as-events.md): the core entity is the bait site (`bait_sites`); the decision stands.
 - **Date:** 2026-10-20
 - **Deciders:** Luis
 - **Amends:** ADR 0001 (terminology only; the ownership decision stands)
