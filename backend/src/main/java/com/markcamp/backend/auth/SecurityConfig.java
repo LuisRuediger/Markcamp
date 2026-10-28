@@ -17,9 +17,11 @@ import com.markcamp.backend.user.UserProvisioningService;
 @Configuration
 class SecurityConfig {
 
-	// Firebase's signing keys in JWK format. Firebase's docs only list the x509 form of the same keys
-	// (https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com, same key ids);
-	// NimbusJwtDecoder needs JWK. If this endpoint ever stops working, the x509 one is the documented fallback.
+	// Firebase's signing keys in JWK format, the jwks_uri advertised in Firebase's OpenID discovery document
+	// (https://securetoken.google.com/<projectId>/.well-known/openid-configuration). Firebase's ID-token docs only
+	// list the x509 form of the same keys (same key ids); we do not parse that ourselves (key caching and rotation
+	// are security-sensitive and Nimbus already does them). If this endpoint stops working, validation fails
+	// closed (every request is a 401); the fallback is issuer-uri discovery with the same validators, not x509.
 	private static final String FIREBASE_JWK_SET_URI =
 			"https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com";
 
