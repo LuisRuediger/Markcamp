@@ -6,11 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -21,6 +18,7 @@ import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.jayway.jsonpath.JsonPath;
+import com.markcamp.backend.PostgresTestContainer;
 import com.markcamp.backend.TestTokens;
 
 /**
@@ -28,7 +26,7 @@ import com.markcamp.backend.TestTokens;
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-class MeControllerTest {
+class MeControllerTest implements PostgresTestContainer {
 
 	@TestBean(methodName = "com.markcamp.backend.TestTokens#jwtDecoder")
 	JwtDecoder jwtDecoder;
@@ -38,17 +36,6 @@ class MeControllerTest {
 
 	@Autowired
 	JdbcClient jdbcClient;
-
-	private final List<String> createdSubjects = new ArrayList<>();
-
-	@AfterEach
-	void deleteTestUsers() {
-		if (!this.createdSubjects.isEmpty()) {
-			this.jdbcClient.sql("DELETE FROM users WHERE auth_provider = 'FIREBASE' AND auth_subject IN (:subjects)")
-				.param("subjects", this.createdSubjects)
-				.update();
-		}
-	}
 
 	@Test
 	void rejectsRequestWithoutToken() throws Exception {
@@ -108,9 +95,7 @@ class MeControllerTest {
 	}
 
 	private String newSubject() {
-		String subject = "test-" + UUID.randomUUID();
-		this.createdSubjects.add(subject);
-		return subject;
+		return "test-" + UUID.randomUUID();
 	}
 
 	private UUID idInDatabase(String subject) {

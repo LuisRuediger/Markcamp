@@ -15,13 +15,14 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.jayway.jsonpath.JsonPath;
+import com.markcamp.backend.PostgresTestContainer;
 
 /**
  * Spring Security 7 imposes a public RFC 9728 endpoint; this pins its content and that everything else needs a token.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-class SecurityRulesTest {
+class SecurityRulesTest implements PostgresTestContainer {
 
 	@Autowired
 	MockMvc mockMvc;

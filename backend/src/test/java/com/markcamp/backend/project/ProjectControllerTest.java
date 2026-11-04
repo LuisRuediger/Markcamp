@@ -6,13 +6,11 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -32,11 +30,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import com.jayway.jsonpath.JsonPath;
+import com.markcamp.backend.PostgresTestContainer;
 import com.markcamp.backend.TestTokens;
 import com.markcamp.backend.common.UuidV7;
 
 /**
- * Sends real signed tokens through the whole filter chain and uses the Postgres from Docker Compose.
+ * Sends real signed tokens through the whole filter chain and uses a real Postgres.
  * <p>
  * No MockMvc printing: when a test fails it prints the Authorization header, and the captured output covers the whole
  * class, so one failure would also fail the check that the application never logs tokens.
@@ -44,7 +43,7 @@ import com.markcamp.backend.common.UuidV7;
 @SpringBootTest
 @AutoConfigureMockMvc(print = MockMvcPrint.NONE)
 @ExtendWith(OutputCaptureExtension.class)
-class ProjectControllerTest {
+class ProjectControllerTest implements PostgresTestContainer {
 
 	private static final List<String> PROBLEM_KEYS = List.of("type", "title", "status", "detail", "instance", "code",
 			"errors");
@@ -57,23 +56,6 @@ class ProjectControllerTest {
 
 	@Autowired
 	JdbcClient jdbcClient;
-
-	private final List<String> createdSubjects = new ArrayList<>();
-
-	@AfterEach
-	void deleteTestData() {
-		if (this.createdSubjects.isEmpty()) {
-			return;
-		}
-		// Projects first: their memberships go with them through the cascade, and then nothing references the users.
-		this.jdbcClient.sql("""
-				DELETE FROM projects WHERE created_by IN (
-					SELECT id FROM users WHERE auth_provider = 'FIREBASE' AND auth_subject IN (:subjects))
-				""").param("subjects", this.createdSubjects).update();
-		this.jdbcClient.sql("DELETE FROM users WHERE auth_provider = 'FIREBASE' AND auth_subject IN (:subjects)")
-			.param("subjects", this.createdSubjects)
-			.update();
-	}
 
 	// Create
 
@@ -416,9 +398,7 @@ class ProjectControllerTest {
 	}
 
 	private String newSubject() {
-		String subject = "test-" + UUID.randomUUID();
-		this.createdSubjects.add(subject);
-		return subject;
+		return "test-" + UUID.randomUUID();
 	}
 
 	private UUID userId(String subject) {

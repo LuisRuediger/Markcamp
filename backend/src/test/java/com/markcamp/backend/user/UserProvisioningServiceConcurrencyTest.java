@@ -13,14 +13,15 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import com.markcamp.backend.PostgresTestContainer;
+
 @SpringBootTest
-class UserProvisioningServiceConcurrencyTest {
+class UserProvisioningServiceConcurrencyTest implements PostgresTestContainer {
 
 	private static final int THREADS = 8;
 
@@ -31,13 +32,6 @@ class UserProvisioningServiceConcurrencyTest {
 	JdbcClient jdbcClient;
 
 	private final String subject = "test-" + UUID.randomUUID();
-
-	@AfterEach
-	void deleteTestUser() {
-		this.jdbcClient.sql("DELETE FROM users WHERE auth_provider = 'FIREBASE' AND auth_subject = ?")
-			.param(this.subject)
-			.update();
-	}
 
 	@Test
 	void concurrentFirstRequestsCreateOneUser() throws Exception {
