@@ -43,7 +43,10 @@ class ProjectService {
 	}
 
 	List<ProjectResponse> list(UUID userId) {
-		return this.projectRepository.findAllOfUser(userId);
+		return this.projectRepository.findAllOfUser(userId)
+			.stream()
+			.map((row) -> new ProjectResponse(row.id(), row.name(), row.role(), row.createdAt()))
+			.toList();
 	}
 
 	@Transactional(readOnly = true)

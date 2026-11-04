@@ -14,13 +14,13 @@ interface ProjectRepository extends Repository<Project, UUID> {
 	Optional<Project> findById(UUID id);
 
 	@Query("""
-			select new com.markcamp.backend.project.ProjectResponse(p.id, p.name, m.role, p.createdAt)
+			select new com.markcamp.backend.project.ProjectRow(p.id, p.name, m.role, p.createdAt)
 			from Project p
 			join ProjectMember m on m.projectId = p.id
 			where m.userId = :userId
 			order by p.createdAt, p.id
 			""")
-	List<ProjectResponse> findAllOfUser(UUID userId);
+	List<ProjectRow> findAllOfUser(UUID userId);
 
 	/**
 	 * Inserts the project unless the id is taken. Returns the number of rows inserted (0 or 1).

@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-03
 - **Deciders:** Luis
+- **Amended:** 2026-11-03 (bait site slice: added BAIT_SITE_NOT_FOUND; OUT_OF_RANGE also covers timestamps)
 
 ## Context
 
@@ -103,6 +104,7 @@ clients.** One exception: authentication failures (401), see below.
 | One or more invalid fields | 400 | `VALIDATION_FAILED` (+ `errors`) |
 | Authenticated, but lacks the required role in the project | 403 | `FORBIDDEN` |
 | Project does not exist **or** the caller is not a member (identical response) | 404 | `PROJECT_NOT_FOUND` |
+| Bait site does not exist in this project, or exists in another project (identical response) | 404 | `BAIT_SITE_NOT_FOUND` |
 | No endpoint at this path | 404 | `RESOURCE_NOT_FOUND` |
 | Wrong HTTP method | 405 | `METHOD_NOT_ALLOWED` |
 | Create with an id that already exists | 409 | `ID_ALREADY_EXISTS` |
@@ -120,7 +122,7 @@ introduces the feature).
 | `REQUIRED` | Missing, null, or blank after trimming |
 | `TOO_LONG` | Longer than the maximum length |
 | `INVALID_FORMAT` | Wrong format (e.g. not a canonical UUID v7) |
-| `OUT_OF_RANGE` | Number outside the allowed range (e.g. latitude) |
+| `OUT_OF_RANGE` | Value outside the allowed range (e.g. latitude, a timestamp too far in the future) |
 
 - `field` is the name of the field **in the JSON body**, not the Java field name.
 - All invalid fields are reported in one response, not only the first.
