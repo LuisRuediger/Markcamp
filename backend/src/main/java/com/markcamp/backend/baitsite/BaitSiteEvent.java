@@ -11,7 +11,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 /**
- * One fact in the append-only history of a site (ADR 0005). Rows are created only by {@link BaitSiteService}.
+ * One fact in the append-only history of a site (ADR 0005). Rows are created only by {@link BaitSiteEventService}.
  */
 @Entity
 @Table(name = "bait_site_events")

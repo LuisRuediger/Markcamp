@@ -4,6 +4,7 @@
 - **Date:** 2026-11-03
 - **Deciders:** Luis
 - **Amended:** 2026-11-03 (bait site slice: added BAIT_SITE_NOT_FOUND; OUT_OF_RANGE also covers timestamps)
+- **Amended:** 2026-11-03 (bait site events slice: added BAIT_SITE_EVENT_NOT_FOUND and INVALID_EVENT_SEQUENCE; OUT_OF_RANGE wording now "outside its allowed window", same meaning)
 
 ## Context
 
@@ -58,6 +59,19 @@ Other constraints:
    Rejected.
 2. **Our own small set of field codes.** Chosen.
 
+### Invalid event sequence (amendment, events slice)
+
+An event that would make a bait site's history invalid under the state machine
+(ADR 0005) depends on server state, not on a field, so it is not a validation error.
+
+1. **400 `VALIDATION_FAILED` with a field error on `type`.** Rejected: the field is not
+   wrong on its own, and the same request can be valid on another bait site.
+2. **422 Unprocessable Content.** Acceptable semantically, but one more status for
+   clients to handle with no extra information over `code`. Rejected.
+3. **409 Conflict with its own `code`.** "Conflicts with the current state of the
+   resource" is what happens. Chosen. Clients already branch on `code` within `4xx`, so
+   sharing 409 with `ID_ALREADY_EXISTS` costs nothing.
+
 ## Decision
 
 **Every error response from the API is a Problem Details document
@@ -94,6 +108,12 @@ clients.** One exception: authentication failures (401), see below.
 - Within `4xx`, `code` decides the action. For example, `ID_ALREADY_EXISTS` on a create
   means "confirm with a `GET`" (ADR 0002: client-generated ids, the server never
   upserts).
+- `INVALID_EVENT_SEQUENCE` means the event was not stored because it does not fit the
+  bait site's current history. Resending it unchanged will not help while the history
+  stays the same; how the client resolves it belongs to the sync strategy.
+- **A resend of an event that is already stored always gets `ID_ALREADY_EXISTS`, never
+  `INVALID_EVENT_SEQUENCE`**, so a client whose response was lost can confirm with a
+  `GET` instead of concluding that the event failed.
 - The UI maps `code` (and field codes) to Portuguese text.
 
 ### Problem codes
@@ -105,9 +125,11 @@ clients.** One exception: authentication failures (401), see below.
 | Authenticated, but lacks the required role in the project | 403 | `FORBIDDEN` |
 | Project does not exist **or** the caller is not a member (identical response) | 404 | `PROJECT_NOT_FOUND` |
 | Bait site does not exist in this project, or exists in another project (identical response) | 404 | `BAIT_SITE_NOT_FOUND` |
+| Event does not exist on this bait site, or exists on another bait site or project (identical response) | 404 | `BAIT_SITE_EVENT_NOT_FOUND` |
 | No endpoint at this path | 404 | `RESOURCE_NOT_FOUND` |
 | Wrong HTTP method | 405 | `METHOD_NOT_ALLOWED` |
 | Create with an id that already exists | 409 | `ID_ALREADY_EXISTS` |
+| The event would make the bait site's history invalid under the state machine (ADR 0005), including when it is valid at its own position but breaks a later event | 409 | `INVALID_EVENT_SEQUENCE` |
 | Wrong `Content-Type` | 415 | `UNSUPPORTED_MEDIA_TYPE` |
 | Any other client error raised by the framework | its status | `INVALID_REQUEST` |
 | Anything else | 500 | `INTERNAL_ERROR` |
@@ -121,8 +143,8 @@ introduces the feature).
 |---|---|
 | `REQUIRED` | Missing, null, or blank after trimming |
 | `TOO_LONG` | Longer than the maximum length |
-| `INVALID_FORMAT` | Wrong format (e.g. not a canonical UUID v7) |
-| `OUT_OF_RANGE` | Value outside the allowed range (e.g. latitude, a timestamp too far in the future) |
+| `INVALID_FORMAT` | Wrong format or not one of the accepted values (e.g. not a canonical UUID v7, an unknown event type) |
+| `OUT_OF_RANGE` | Value outside its allowed window (e.g. latitude, a timestamp too far in the future or too far in the past) |
 
 - `field` is the name of the field **in the JSON body**, not the Java field name.
 - All invalid fields are reported in one response, not only the first.
@@ -154,6 +176,9 @@ sign in again), so it needs no `code`.
   not a helpful 400. Accepted: it means the API failed to validate, which is a bug to
   fix, and mapping it automatically would leak constraint names or misstate the cause.
 - 401 is the one error without a Problem Details body.
+- `INVALID_EVENT_SEQUENCE` carries no detail (which event broke, current status), so the
+  UI can only show a generic message. Adding an extension member later is an amendment
+  that does not break clients.
 
 ### Derived rules (non-negotiable)
 

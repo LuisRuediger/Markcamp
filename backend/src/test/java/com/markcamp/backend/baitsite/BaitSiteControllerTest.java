@@ -91,9 +91,10 @@ class BaitSiteControllerTest implements PostgresTestContainer {
 		assertThat(response.getHeader("Location")).isEqualTo("/api/projects/" + projectId + "/bait-sites/" + siteId);
 		String body = bodyOf(response);
 		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys("id", "name", "latitude", "longitude",
-				"locationAccuracyM", "createdAt");
+				"locationAccuracyM", "status", "createdAt");
 		assertThat(JsonPath.<String>read(body, "$.id")).isEqualTo(siteId);
 		assertThat(JsonPath.<String>read(body, "$.name")).isEqualTo("Isca 31");
+		assertThat(JsonPath.<String>read(body, "$.status")).isEqualTo("ARMED");
 		assertThat(JsonPath.<Double>read(body, "$.latitude")).isEqualTo(-26.9194);
 		assertThat(JsonPath.<Double>read(body, "$.longitude")).isEqualTo(-49.0661);
 		assertThat(JsonPath.<Double>read(body, "$.locationAccuracyM")).isEqualTo(12.5);
@@ -225,7 +226,11 @@ class BaitSiteControllerTest implements PostgresTestContainer {
 	static Stream<Arguments> invalidValues() {
 		String v4 = quoted(UUID.randomUUID().toString());
 		return Stream.of(arguments("id", ABSENT, "id", "REQUIRED"), arguments("id", "null", "id", "REQUIRED"),
+				arguments("id", quoted(""), "id", "REQUIRED"), arguments("id", quoted("   "), "id", "REQUIRED"),
+				arguments("id", quoted(" "), "id", "REQUIRED"), arguments("id", quoted("\\u00A0"), "id", "REQUIRED"),
 				arguments("id", quoted("not-a-uuid"), "id", "INVALID_FORMAT"), arguments("id", v4, "id", "INVALID_FORMAT"),
+				// Machine data is not trimmed: a padded id is a client bug we want to see.
+				arguments("id", quoted(" " + UuidV7.generate() + " "), "id", "INVALID_FORMAT"),
 
 				arguments("name", ABSENT, "name", "REQUIRED"), arguments("name", "null", "name", "REQUIRED"),
 				arguments("name", quoted("   "), "name", "REQUIRED"),
@@ -262,11 +267,22 @@ class BaitSiteControllerTest implements PostgresTestContainer {
 
 				arguments("installation.id", ABSENT, "installation.id", "REQUIRED"),
 				arguments("installation.id", "null", "installation.id", "REQUIRED"),
+				arguments("installation.id", quoted(""), "installation.id", "REQUIRED"),
+				arguments("installation.id", quoted("   "), "installation.id", "REQUIRED"),
+				arguments("installation.id", quoted(" "), "installation.id", "REQUIRED"),
+				arguments("installation.id", quoted("\\u00A0"), "installation.id", "REQUIRED"),
 				arguments("installation.id", quoted("not-a-uuid"), "installation.id", "INVALID_FORMAT"),
 				arguments("installation.id", v4, "installation.id", "INVALID_FORMAT"),
+				arguments("installation.id", quoted(" " + UuidV7.generate() + " "), "installation.id", "INVALID_FORMAT"),
 
 				arguments("installation.occurredAt", ABSENT, "installation.occurredAt", "REQUIRED"),
 				arguments("installation.occurredAt", "null", "installation.occurredAt", "REQUIRED"),
+				arguments("installation.occurredAt", quoted(""), "installation.occurredAt", "REQUIRED"),
+				arguments("installation.occurredAt", quoted("   "), "installation.occurredAt", "REQUIRED"),
+				arguments("installation.occurredAt", quoted(" "), "installation.occurredAt", "REQUIRED"),
+				arguments("installation.occurredAt", quoted("\\u00A0"), "installation.occurredAt", "REQUIRED"),
+				arguments("installation.occurredAt", quoted(" 2026-11-03T09:20:00Z "), "installation.occurredAt",
+						"INVALID_FORMAT"),
 				arguments("installation.occurredAt", quoted("2026-11-03T09:20:00"), "installation.occurredAt",
 						"INVALID_FORMAT"),
 				arguments("installation.occurredAt", quoted("garbage"), "installation.occurredAt", "INVALID_FORMAT"),
@@ -365,9 +381,10 @@ class BaitSiteControllerTest implements PostgresTestContainer {
 		assertThat(response.getStatus()).isEqualTo(200);
 		String body = bodyOf(response);
 		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys("id", "name", "latitude", "longitude",
-				"locationAccuracyM", "createdAt");
+				"locationAccuracyM", "status", "createdAt");
 		assertThat(JsonPath.<String>read(body, "$.id")).isEqualTo(siteId);
 		assertThat(JsonPath.<String>read(body, "$.name")).isEqualTo("Isca 31");
+		assertThat(JsonPath.<String>read(body, "$.status")).isEqualTo("ARMED");
 	}
 
 	@Test
@@ -424,6 +441,7 @@ class BaitSiteControllerTest implements PostgresTestContainer {
 		assertThat(JsonPath.<List<String>>read(body, "$.items[*].id")).containsExactly(first, second, third);
 		assertThat(JsonPath.<List<String>>read(body, "$.items[*].name")).containsExactly("First", "Second", "Third");
 		assertThat(JsonPath.<List<String>>read(body, "$.items[*].createdAt")).hasSize(3).doesNotContainNull();
+		assertThat(JsonPath.<List<String>>read(body, "$.items[*].status")).containsExactly("ARMED", "ARMED", "ARMED");
 	}
 
 	@Test

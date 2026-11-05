@@ -10,6 +10,7 @@ import com.markcamp.backend.common.FieldCode;
 import com.markcamp.backend.common.InvalidField;
 import com.markcamp.backend.common.NameRule;
 import com.markcamp.backend.common.RequestValidationException;
+import com.markcamp.backend.common.UnicodeSpaces;
 import com.markcamp.backend.common.UuidV7;
 
 /**
@@ -69,7 +70,7 @@ record CreateBaitSiteRequest(String id, String name, Double latitude, Double lon
 
 	private static Optional<UUID> parseId(String value, String field, List<InvalidField> invalidFields) {
 		Optional<UUID> parsed = UuidV7.parseClientId(value);
-		if (value == null) {
+		if (UnicodeSpaces.isNullOrBlank(value)) {
 			invalidFields.add(new InvalidField(field, FieldCode.REQUIRED));
 		}
 		else if (parsed.isEmpty()) {

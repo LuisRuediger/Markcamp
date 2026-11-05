@@ -3,7 +3,7 @@ package com.markcamp.backend.common;
 import java.util.List;
 
 /**
- * The rule for user-given names (projects, bait sites), and the single definition of what counts as a space.
+ * The rule for user-given names (projects, bait sites).
  */
 public final class NameRule {
 
@@ -15,7 +15,7 @@ public final class NameRule {
 	 * JSON body, and the caller must not use the returned value.
 	 */
 	public static String validate(String value, int maxLength, String field, List<InvalidField> invalidFields) {
-		String trimmed = (value != null) ? trimSpaces(value) : "";
+		String trimmed = (value != null) ? UnicodeSpaces.trim(value) : "";
 		if (trimmed.isEmpty()) {
 			invalidFields.add(new InvalidField(field, FieldCode.REQUIRED));
 		}
@@ -29,23 +29,6 @@ public final class NameRule {
 			invalidFields.add(new InvalidField(field, FieldCode.TOO_LONG));
 		}
 		return trimmed;
-	}
-
-	// One definition of "space" for both trimming and blank names; strip() alone would leave NBSP at the ends.
-	private static String trimSpaces(String value) {
-		int start = 0;
-		int end = value.length();
-		while (start < end && isSpace(value.charAt(start))) {
-			start++;
-		}
-		while (end > start && isSpace(value.charAt(end - 1))) {
-			end--;
-		}
-		return value.substring(start, end);
-	}
-
-	private static boolean isSpace(char character) {
-		return Character.isWhitespace(character) || Character.isSpaceChar(character);
 	}
 
 }

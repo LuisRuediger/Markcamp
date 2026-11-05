@@ -163,6 +163,18 @@ class ProjectControllerTest implements PostgresTestContainer {
 		assertInvalid("{\"id\": null, \"name\": \"Valid\"}", Map.of("id", "REQUIRED"));
 	}
 
+	@ParameterizedTest
+	@ValueSource(strings = { "", "   ", " ", "\\u00A0" })
+	void blankIdIsRequired(String id) throws Exception {
+		assertInvalid(json(id, "Valid"), Map.of("id", "REQUIRED"));
+	}
+
+	// Machine data is not trimmed: a padded id is a client bug we want to see.
+	@Test
+	void validIdWithSpacesAroundItIsInvalidFormat() throws Exception {
+		assertInvalid(json(" " + UuidV7.generate() + " ", "Valid"), Map.of("id", "INVALID_FORMAT"));
+	}
+
 	@Test
 	void malformedIdIsInvalidFormat() throws Exception {
 		assertInvalid(json("not-a-uuid", "Valid"), Map.of("id", "INVALID_FORMAT"));

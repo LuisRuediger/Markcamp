@@ -9,6 +9,7 @@ import com.markcamp.backend.common.FieldCode;
 import com.markcamp.backend.common.InvalidField;
 import com.markcamp.backend.common.NameRule;
 import com.markcamp.backend.common.RequestValidationException;
+import com.markcamp.backend.common.UnicodeSpaces;
 import com.markcamp.backend.common.UuidV7;
 
 /**
@@ -28,7 +29,7 @@ record CreateProjectRequest(String id, String name) {
 		List<InvalidField> invalidFields = new ArrayList<>();
 
 		Optional<UUID> parsedId = UuidV7.parseClientId(this.id);
-		if (this.id == null) {
+		if (UnicodeSpaces.isNullOrBlank(this.id)) {
 			invalidFields.add(new InvalidField("id", FieldCode.REQUIRED));
 		}
 		else if (parsedId.isEmpty()) {

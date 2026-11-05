@@ -89,6 +89,15 @@
 	</dependencies>
 
 	<build>
+		<testResources>
+			<testResource>
+				<directory>src/test/resources</directory>
+			</testResource>
+			<!-- The state machine cases are shared with the frontend, so they do not live inside backend/. -->
+			<testResource>
+				<directory>../shared</directory>
+			</testResource>
+		</testResources>
 		<plugins>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>

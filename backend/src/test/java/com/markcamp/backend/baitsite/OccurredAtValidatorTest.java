@@ -101,8 +101,7 @@ class OccurredAtValidatorTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(strings = { "", " ", "garbage", "2026-13-01T00:00:00Z", "2026-02-30T00:00:00Z", "2026-11-03",
-			"1730000000" })
+	@ValueSource(strings = { "garbage", "2026-13-01T00:00:00Z", "2026-02-30T00:00:00Z", "2026-11-03", "1730000000" })
 	void garbageIsInvalidFormat(String value) {
 		assertRejected(value, FieldCode.INVALID_FORMAT);
 	}
@@ -110,6 +109,18 @@ class OccurredAtValidatorTest {
 	@Test
 	void nullIsRequired() {
 		assertRejected(null, FieldCode.REQUIRED);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "", "   ", " ", " " })
+	void blankIsRequired(String value) {
+		assertRejected(value, FieldCode.REQUIRED);
+	}
+
+	// Machine data is not trimmed: a padded value is a client bug we want to see.
+	@Test
+	void validInstantWithSpacesAroundItIsInvalidFormat() {
+		assertRejected(" 2026-11-03T09:20:00Z ", FieldCode.INVALID_FORMAT);
 	}
 
 	@Test

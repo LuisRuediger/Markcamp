@@ -1,6 +1,5 @@
 package com.markcamp.backend.baitsite;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -12,7 +11,7 @@ import com.markcamp.backend.project.ProjectMembership;
 
 // Repository, not JpaRepository: save() on an entity with an assigned id is a merge, i.e. an upsert (ADR 0002).
 // Every method takes a ProjectMembership, never a bare project id, so a query without the access check does not compile
-// (ADR 0005, rule 6).
+// (ADR 0005, rule 6). Reads of site data with its status are in BaitSiteReadRepository.
 interface BaitSiteRepository extends Repository<BaitSite, UUID> {
 
 	/**
@@ -20,21 +19,23 @@ interface BaitSiteRepository extends Repository<BaitSite, UUID> {
 	 * is in memory, and no comparison to forget.
 	 */
 	@Query("""
-			select new com.markcamp.backend.baitsite.BaitSiteRow(
-				s.id, s.name, s.latitude, s.longitude, s.locationAccuracyM, s.createdAt)
+			select count(s) > 0
 			from BaitSite s
 			where s.id = :id and s.projectId = :#{#membership.projectId()}
 			""")
-	Optional<BaitSiteRow> findInProject(UUID id, ProjectMembership membership);
+	boolean existsInProject(UUID id, ProjectMembership membership);
 
-	@Query("""
-			select new com.markcamp.backend.baitsite.BaitSiteRow(
-				s.id, s.name, s.latitude, s.longitude, s.locationAccuracyM, s.createdAt)
-			from BaitSite s
-			where s.projectId = :#{#membership.projectId()}
-			order by s.createdAt, s.id
+	/**
+	 * Only {@link BaitSiteLock} calls this. Native so that the SQL says FOR UPDATE: JPA's PESSIMISTIC_WRITE leaves the exact
+	 * lock to Hibernate.
+	 */
+	@Query(nativeQuery = true, value = """
+			SELECT id
+			FROM bait_sites
+			WHERE id = :id AND project_id = :#{#membership.projectId()}
+			FOR UPDATE
 			""")
-	List<BaitSiteRow> findAllInProject(ProjectMembership membership);
+	Optional<UUID> lockInProject(UUID id, ProjectMembership membership);
 
 	/**
 	 * Inserts the site unless the id is taken, in any project. Returns the number of rows inserted (0 or 1).

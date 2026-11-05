@@ -23,16 +23,23 @@ class BaitSiteService {
 
 	private final BaitSiteRepository baitSiteRepository;
 
-	private final BaitSiteEventRepository eventRepository;
+	private final BaitSiteReadRepository baitSiteReadRepository;
+
+	private final BaitSiteEventService eventService;
+
+	private final BaitSiteLock baitSiteLock;
 
 	private final ProjectAccess projectAccess;
 
 	private final OccurredAtValidator occurredAtValidator;
 
-	BaitSiteService(BaitSiteRepository baitSiteRepository, BaitSiteEventRepository eventRepository,
-			ProjectAccess projectAccess, OccurredAtValidator occurredAtValidator) {
+	BaitSiteService(BaitSiteRepository baitSiteRepository, BaitSiteReadRepository baitSiteReadRepository,
+			BaitSiteEventService eventService, BaitSiteLock baitSiteLock, ProjectAccess projectAccess,
+			OccurredAtValidator occurredAtValidator) {
 		this.baitSiteRepository = baitSiteRepository;
-		this.eventRepository = eventRepository;
+		this.baitSiteReadRepository = baitSiteReadRepository;
+		this.eventService = eventService;
+		this.baitSiteLock = baitSiteLock;
 		this.projectAccess = projectAccess;
 		this.occurredAtValidator = occurredAtValidator;
 	}
@@ -40,9 +47,6 @@ class BaitSiteService {
 	/**
 	 * The site and its first INSTALLED event are created together (ADR 0005, rule 5). The same 409 for either id, without
 	 * saying which: a GET of the site tells the client whether its earlier request succeeded.
-	 * <p>
-	 * No state machine replay yet: a new site with a single INSTALLED is the one sequence that is always valid by
-	 * construction. The replay comes with the events endpoint.
 	 */
 	@Transactional
 	BaitSiteResponse create(UUID userId, UUID projectId, CreateBaitSiteRequest request) {
@@ -53,24 +57,23 @@ class BaitSiteService {
 				site.locationAccuracyM(), membership) == 0) {
 			throw new IdAlreadyExistsException();
 		}
-		// This exception rolls back the site above only because it is unchecked: by default @Transactional commits on
-		// checked exceptions.
-		if (this.eventRepository.insertIfAbsent(site.installationId(), site.id(), BaitSiteEventType.INSTALLED.name(),
-				site.installationOccurredAt(), membership) == 0) {
-			throw new IdAlreadyExistsException();
-		}
+		// Locking a row inserted in this transaction is fine, and it keeps one path for every event write. A taken event id
+		// rolls back the site above only because the exception is unchecked: by default @Transactional commits on checked
+		// exceptions.
+		this.eventService.append(site.installationId(), BaitSiteEventType.INSTALLED, site.installationOccurredAt(),
+				this.baitSiteLock.acquire(site.id(), membership));
 
 		// Ids only: a site's name and location say where someone keeps bees, often near their home (personal data).
 		log.info("Bait site created: baitSiteId={} projectId={} userId={}", site.id(), membership.projectId(),
 				membership.userId());
 		// Read back because the database sets created_at.
-		return toResponse(this.baitSiteRepository.findInProject(site.id(), membership).orElseThrow());
+		return toResponse(this.baitSiteReadRepository.findInProject(site.id(), membership).orElseThrow());
 	}
 
 	@Transactional(readOnly = true)
 	List<BaitSiteResponse> list(UUID userId, UUID projectId) {
 		ProjectMembership membership = this.projectAccess.requireMember(userId, projectId);
-		return this.baitSiteRepository.findAllInProject(membership)
+		return this.baitSiteReadRepository.findAllInProject(membership)
 			.stream()
 			.map(BaitSiteService::toResponse)
 			.toList();
@@ -79,14 +82,14 @@ class BaitSiteService {
 	@Transactional(readOnly = true)
 	BaitSiteResponse get(UUID userId, UUID projectId, UUID baitSiteId) {
 		ProjectMembership membership = this.projectAccess.requireMember(userId, projectId);
-		return this.baitSiteRepository.findInProject(baitSiteId, membership)
+		return this.baitSiteReadRepository.findInProject(baitSiteId, membership)
 			.map(BaitSiteService::toResponse)
 			.orElseThrow(BaitSiteNotFoundException::new);
 	}
 
 	private static BaitSiteResponse toResponse(BaitSiteRow row) {
 		return new BaitSiteResponse(row.id(), row.name(), row.latitude(), row.longitude(), row.locationAccuracyM(),
-				row.createdAt());
+				row.status(), row.createdAt());
 	}
 
 }

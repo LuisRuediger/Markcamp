@@ -14,6 +14,7 @@ import org.springframework.util.Assert;
 
 import com.markcamp.backend.common.FieldCode;
 import com.markcamp.backend.common.InvalidField;
+import com.markcamp.backend.common.UnicodeSpaces;
 
 /**
  * The rules for {@code occurred_at}, a client-supplied instant (ADR 0005, rule 2).
@@ -41,7 +42,7 @@ class OccurredAtValidator {
 	 * Returns the instant, or null after adding to {@code invalidFields} under {@code field}, the name in the JSON body.
 	 */
 	Instant validate(String value, String field, List<InvalidField> invalidFields) {
-		if (value == null) {
+		if (UnicodeSpaces.isNullOrBlank(value)) {
 			invalidFields.add(new InvalidField(field, FieldCode.REQUIRED));
 			return null;
 		}
