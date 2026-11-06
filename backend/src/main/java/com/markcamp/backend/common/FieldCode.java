@@ -8,6 +8,7 @@ public enum FieldCode {
 	REQUIRED,
 	TOO_LONG,
 	INVALID_FORMAT,
-	OUT_OF_RANGE
+	OUT_OF_RANGE,
+	NOT_ALLOWED
 
 }

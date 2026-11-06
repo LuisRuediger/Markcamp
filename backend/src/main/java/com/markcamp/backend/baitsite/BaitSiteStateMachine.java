@@ -1,8 +1,10 @@
 package com.markcamp.backend.baitsite;
 
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * The transition table of ADR 0005. {@code shared/bait-site-state-machine-cases.json} is the contract for this class and
@@ -27,23 +29,32 @@ final class BaitSiteStateMachine {
 	}
 
 	/**
-	 * Replays event types that are already in history order.
+	 * Replays non-voided events that are already in history order.
 	 */
-	static Replay replay(List<BaitSiteEventType> eventsInHistoryOrder) {
+	static Replay replay(List<BaitSiteHistoryEvent> eventsInHistoryOrder) {
 		if (eventsInHistoryOrder.isEmpty()) {
 			// "None" is not a status, so there is nothing to answer. The replay always includes the event being written.
 			throw new IllegalArgumentException("There are no events to replay");
 		}
 		// Null until the first event: "none" in the table of ADR 0005.
 		BaitSiteStatus status = null;
+		// Equality only, which is the same in Java and in Postgres. A voided capture needs no code here: the history has
+		// only non-voided events, so it never enters this set. Voiding (slice B2) relies on it.
+		Set<UUID> earlierCaptures = new HashSet<>();
 		for (int i = 0; i < eventsInHistoryOrder.size(); i++) {
-			BaitSiteEventType event = eventsInHistoryOrder.get(i);
-			Set<BaitSiteStatus> allowedFrom = allowedFrom(event);
-			boolean allowed = (status != null) ? allowedFrom.contains(status) : event == BaitSiteEventType.INSTALLED;
+			BaitSiteHistoryEvent event = eventsInHistoryOrder.get(i);
+			BaitSiteEventType type = event.type();
+			boolean allowed = (status != null) ? allowedFrom(type).contains(status) : type == BaitSiteEventType.INSTALLED;
+			if (type == BaitSiteEventType.IDENTIFIED && !earlierCaptures.contains(event.identifiedEventId())) {
+				allowed = false;
+			}
 			if (!allowed) {
 				return new Invalid(i);
 			}
-			status = event.statusAfter().orElse(status);
+			if (type == BaitSiteEventType.CAPTURED) {
+				earlierCaptures.add(event.id());
+			}
+			status = type.statusAfter().orElse(status);
 		}
 		return new Valid(status);
 	}
@@ -57,9 +68,8 @@ final class BaitSiteStateMachine {
 			case LOST, COLLECTED -> EnumSet.of(BaitSiteStatus.CAPTURED);
 			case REMOVED -> EnumSet.of(BaitSiteStatus.ARMED, BaitSiteStatus.ACTIVE, BaitSiteStatus.LOST);
 			case INSPECTED -> EnumSet.complementOf(EnumSet.of(BaitSiteStatus.EMPTY));
-			// No IDENTIFIED can exist yet, because the API rejects the type. Its rule depends on the capture it points to,
-			// which comes with species.
-			case IDENTIFIED -> throw new IllegalStateException("IDENTIFIED cannot be replayed yet");
+			// Any status. What it does depend on is the capture it points to, checked in replay().
+			case IDENTIFIED -> EnumSet.allOf(BaitSiteStatus.class);
 		};
 	}
 

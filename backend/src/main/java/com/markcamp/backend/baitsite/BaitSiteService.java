@@ -60,8 +60,8 @@ class BaitSiteService {
 		// Locking a row inserted in this transaction is fine, and it keeps one path for every event write. A taken event id
 		// rolls back the site above only because the exception is unchecked: by default @Transactional commits on checked
 		// exceptions.
-		this.eventService.append(site.installationId(), BaitSiteEventType.INSTALLED, site.installationOccurredAt(),
-				this.baitSiteLock.acquire(site.id(), membership));
+		this.eventService.append(site.installationId(), BaitSiteEventType.INSTALLED, site.installationOccurredAt(), null,
+				null, this.baitSiteLock.acquire(site.id(), membership));
 
 		// Ids only: a site's name and location say where someone keeps bees, often near their home (personal data).
 		log.info("Bait site created: baitSiteId={} projectId={} userId={}", site.id(), membership.projectId(),

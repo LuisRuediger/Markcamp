@@ -13,9 +13,9 @@ import com.markcamp.backend.baitsite.BaitSiteLock.LockedBaitSite;
 import com.markcamp.backend.project.ProjectMembership;
 
 // Repository, not JpaRepository: save() on an entity with an assigned id is a merge, i.e. an upsert (ADR 0002).
-// Writes and the history read take a LockedBaitSite, never a bare site id, so writing into a site of another project, or
-// validating without the lock, does not compile. The two read-only queries take a ProjectMembership and filter by its
-// project in the query.
+// Writes, the history read and the target check take a LockedBaitSite, never a bare site id, so writing into a site of
+// another project, or validating without the lock, does not compile. The two read-only queries take a ProjectMembership
+// and filter by its project in the query.
 interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 
 	/**
@@ -23,11 +23,24 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 	 */
 	@Modifying
 	@Query(nativeQuery = true, value = """
-			INSERT INTO bait_site_events (id, bait_site_id, event_type, occurred_at, recorded_by)
-			VALUES (:id, :#{#site.baitSiteId()}, :eventType, :occurredAt, :#{#site.membership().userId()})
+			INSERT INTO bait_site_events
+				(id, bait_site_id, event_type, occurred_at, recorded_by, species_id, identified_event_id)
+			VALUES (:id, :#{#site.baitSiteId()}, :eventType, :occurredAt, :#{#site.membership().userId()}, :speciesId,
+				:identifiedEventId)
 			ON CONFLICT (id) DO NOTHING
 			""")
-	int insertIfAbsent(UUID id, String eventType, Instant occurredAt, LockedBaitSite site);
+	int insertIfAbsent(UUID id, String eventType, Instant occurredAt, UUID speciesId, UUID identifiedEventId,
+			LockedBaitSite site);
+
+	/**
+	 * Whether the event is on this site: of any type, voided or not. An event of another site or project is not found.
+	 */
+	@Query("""
+			select count(e) > 0
+			from BaitSiteEvent e
+			where e.id = :id and e.baitSiteId = :#{#site.baitSiteId()}
+			""")
+	boolean existsOnSite(UUID id, LockedBaitSite site);
 
 	/**
 	 * What the state machine replays. Sorted here and only here: see {@link BaitSiteStateMachine}.
@@ -38,15 +51,16 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 	 * as user provisioning.
 	 */
 	@Query("""
-			select e.eventType
+			select new com.markcamp.backend.baitsite.BaitSiteHistoryEvent(e.id, e.eventType, e.identifiedEventId)
 			from BaitSiteEvent e
 			where e.baitSiteId = :#{#site.baitSiteId()} and e.voidedAt is null
 			order by e.occurredAt, e.id
 			""")
-	List<BaitSiteEventType> findHistory(LockedBaitSite site);
+	List<BaitSiteHistoryEvent> findHistory(LockedBaitSite site);
 
 	@Query("""
-			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.recordedAt)
+			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.speciesId,
+				e.identifiedEventId, e.recordedAt)
 			from BaitSiteEvent e
 			join BaitSite s on s.id = e.baitSiteId
 			where e.baitSiteId = :baitSiteId and s.projectId = :#{#membership.projectId()} and e.voidedAt is null
@@ -58,7 +72,8 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 	 * In one query, so a missing event, an event of another site and a site of another project are the same empty result.
 	 */
 	@Query("""
-			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.recordedAt)
+			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.speciesId,
+				e.identifiedEventId, e.recordedAt)
 			from BaitSiteEvent e
 			join BaitSite s on s.id = e.baitSiteId
 			where e.id = :id and e.baitSiteId = :baitSiteId and s.projectId = :#{#membership.projectId()}

@@ -5,6 +5,7 @@
 - **Deciders:** Luis
 - **Amended:** 2026-11-03 (bait site slice: added BAIT_SITE_NOT_FOUND; OUT_OF_RANGE also covers timestamps)
 - **Amended:** 2026-11-03 (bait site events slice: added BAIT_SITE_EVENT_NOT_FOUND and INVALID_EVENT_SEQUENCE; OUT_OF_RANGE wording now "outside its allowed window", same meaning)
+- **Amended:** 2026-11-06 (bait site events slice B1: added field code NOT_ALLOWED; INVALID_EVENT_SEQUENCE also covers an IDENTIFIED whose capture is not in the history)
 
 ## Context
 
@@ -72,6 +73,21 @@ An event that would make a bait site's history invalid under the state machine
    resource" is what happens. Chosen. Clients already branch on `code` within `4xx`, so
    sharing 409 with `ID_ALREADY_EXISTS` costs nothing.
 
+### Field sent where it does not apply (amendment, events slice B1)
+
+Some fields belong to some event types only (e.g. `speciesId` on `CAPTURED` and
+`IDENTIFIED`). A client may send one on a type that does not take it, e.g. a species on
+an `INSPECTED` event.
+
+1. **Ignore it.** Matches how unknown JSON fields are treated, but the value the person
+   chose in the field is dropped and the client is told the event was stored as sent.
+   Rejected.
+2. **`INVALID_FORMAT`.** Avoids a new code, but the value is not malformed; the field
+   should not be there at all. The case is permanent, so the misleading code would be
+   permanent too. Rejected.
+3. **A new field code `NOT_ALLOWED`.** Says exactly what is wrong; one more value in a
+   small set. Chosen.
+
 ## Decision
 
 **Every error response from the API is a Problem Details document
@@ -114,6 +130,10 @@ clients.** One exception: authentication failures (401), see below.
 - **A resend of an event that is already stored always gets `ID_ALREADY_EXISTS`, never
   `INVALID_EVENT_SEQUENCE`**, so a client whose response was lost can confirm with a
   `GET` instead of concluding that the event failed.
+- For an `IDENTIFIED` event, `INVALID_EVENT_SEQUENCE` also means the capture it points
+  to is not in the bait site's history as a non-voided `CAPTURED` that occurred before
+  it. A capture the server does not have yet (rejected, or still unsynced on another
+  device) is reported the same way: the identification may become valid later.
 - The UI maps `code` (and field codes) to Portuguese text.
 
 ### Problem codes
@@ -129,7 +149,7 @@ clients.** One exception: authentication failures (401), see below.
 | No endpoint at this path | 404 | `RESOURCE_NOT_FOUND` |
 | Wrong HTTP method | 405 | `METHOD_NOT_ALLOWED` |
 | Create with an id that already exists | 409 | `ID_ALREADY_EXISTS` |
-| The event would make the bait site's history invalid under the state machine (ADR 0005), including when it is valid at its own position but breaks a later event | 409 | `INVALID_EVENT_SEQUENCE` |
+| The event would make the bait site's history invalid under the state machine (ADR 0005), including when it is valid at its own position but breaks a later event, and an `IDENTIFIED` whose capture is not in the history | 409 | `INVALID_EVENT_SEQUENCE` |
 | Wrong `Content-Type` | 415 | `UNSUPPORTED_MEDIA_TYPE` |
 | Any other client error raised by the framework | its status | `INVALID_REQUEST` |
 | Anything else | 500 | `INTERNAL_ERROR` |
@@ -143,11 +163,13 @@ introduces the feature).
 |---|---|
 | `REQUIRED` | Missing, null, or blank after trimming |
 | `TOO_LONG` | Longer than the maximum length |
-| `INVALID_FORMAT` | Wrong format or not one of the accepted values (e.g. not a canonical UUID v7, an unknown event type) |
+| `INVALID_FORMAT` | Wrong format or not one of the accepted values (e.g. not a canonical UUID v7, an unknown event type, a species that does not exist) |
 | `OUT_OF_RANGE` | Value outside its allowed window (e.g. latitude, a timestamp too far in the future or too far in the past) |
+| `NOT_ALLOWED` | Sent where this field does not apply (e.g. `speciesId` on an `INSPECTED` event) |
 
 - `field` is the name of the field **in the JSON body**, not the Java field name.
 - All invalid fields are reported in one response, not only the first.
+- A field counts as sent when it is present with a non-null value; `null` is the same as absent.
 
 ### Authentication failures (401)
 

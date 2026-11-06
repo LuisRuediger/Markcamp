@@ -13,6 +13,7 @@ import com.markcamp.backend.baitsite.BaitSiteLock.LockedBaitSite;
 import com.markcamp.backend.common.IdAlreadyExistsException;
 import com.markcamp.backend.project.ProjectAccess;
 import com.markcamp.backend.project.ProjectMembership;
+import com.markcamp.backend.species.SpeciesCatalog;
 
 /**
  * Every method checks access first, so a non-member gets the same 404 for everything under the project: never a 409 or
@@ -33,22 +34,26 @@ class BaitSiteEventService {
 
 	private final OccurredAtValidator occurredAtValidator;
 
+	private final SpeciesCatalog speciesCatalog;
+
 	BaitSiteEventService(BaitSiteEventRepository eventRepository, BaitSiteRepository baitSiteRepository,
-			BaitSiteLock baitSiteLock, ProjectAccess projectAccess, OccurredAtValidator occurredAtValidator) {
+			BaitSiteLock baitSiteLock, ProjectAccess projectAccess, OccurredAtValidator occurredAtValidator,
+			SpeciesCatalog speciesCatalog) {
 		this.eventRepository = eventRepository;
 		this.baitSiteRepository = baitSiteRepository;
 		this.baitSiteLock = baitSiteLock;
 		this.projectAccess = projectAccess;
 		this.occurredAtValidator = occurredAtValidator;
+		this.speciesCatalog = speciesCatalog;
 	}
 
 	@Transactional
 	BaitSiteEventResponse recordEvent(UUID userId, UUID projectId, UUID baitSiteId, RecordBaitSiteEventRequest request) {
 		ProjectMembership membership = this.projectAccess.requireMember(userId, projectId);
-		RecordBaitSiteEventRequest.Validated event = request.validate(this.occurredAtValidator);
+		RecordBaitSiteEventRequest.Validated event = request.validate(this.occurredAtValidator, this.speciesCatalog);
 		LockedBaitSite site = this.baitSiteLock.acquire(baitSiteId, membership);
 
-		append(event.id(), event.type(), event.occurredAt(), site);
+		append(event.id(), event.type(), event.occurredAt(), event.speciesId(), event.identifiedEventId(), site);
 
 		// Ids and type only: never the name or location of a site (personal data).
 		log.info("Bait site event recorded: eventId={} baitSiteId={} projectId={} userId={} type={}", event.id(),
@@ -64,11 +69,20 @@ class BaitSiteEventService {
 	 * Insert first because, if the sequence were validated before the insert, a resend of an event that is already stored
 	 * would enter the replay twice (e.g. two COLLECTED), fail as an invalid sequence, and the client would give up on an
 	 * event that was in fact saved. Inserting first makes that resend a 409 ID_ALREADY_EXISTS, which the client confirms
-	 * with a GET. Voiding (slice B) will reuse the same pattern: change, validate the resulting history, roll back if
+	 * with a GET. Voiding (slice B2) will reuse the same pattern: change, validate the resulting history, roll back if
 	 * invalid.
+	 * <p>
+	 * The target check of an IDENTIFIED comes before the insert and keeps that guarantee: events are never deleted, so the
+	 * target of a stored IDENTIFIED is still there, and its resend reaches the insert and gets the 409 ID_ALREADY_EXISTS.
 	 */
-	void append(UUID id, BaitSiteEventType type, Instant occurredAt, LockedBaitSite site) {
-		if (this.eventRepository.insertIfAbsent(id, type.name(), occurredAt, site) == 0) {
+	void append(UUID id, BaitSiteEventType type, Instant occurredAt, UUID speciesId, UUID identifiedEventId,
+			LockedBaitSite site) {
+		// Here and not in the replay: the composite foreign key (bait_site_id, identified_event_id) would fail on the insert
+		// first and become a 500 (ADR 0006, rule 3). Only existence: the other rules on the target are in the replay.
+		if (type == BaitSiteEventType.IDENTIFIED && !this.eventRepository.existsOnSite(identifiedEventId, site)) {
+			throw new InvalidEventSequenceException();
+		}
+		if (this.eventRepository.insertIfAbsent(id, type.name(), occurredAt, speciesId, identifiedEventId, site) == 0) {
 			throw new IdAlreadyExistsException();
 		}
 		if (BaitSiteStateMachine.replay(this.eventRepository.findHistory(site)) instanceof BaitSiteStateMachine.Invalid) {
@@ -100,7 +114,8 @@ class BaitSiteEventService {
 	}
 
 	private static BaitSiteEventResponse toResponse(BaitSiteEventRow row) {
-		return new BaitSiteEventResponse(row.id(), row.type(), row.occurredAt(), row.recordedAt());
+		return new BaitSiteEventResponse(row.id(), row.type(), row.occurredAt(), row.speciesId(), row.identifiedEventId(),
+				row.recordedAt());
 	}
 
 }

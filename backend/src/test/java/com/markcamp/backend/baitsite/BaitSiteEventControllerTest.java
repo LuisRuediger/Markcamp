@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -26,6 +27,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
@@ -59,8 +61,16 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 	private static final List<String> PROBLEM_KEYS = List.of("type", "title", "status", "detail", "instance", "code",
 			"errors");
 
+	private static final String[] EVENT_KEYS = { "id", "type", "occurredAt", "speciesId", "identifiedEventId",
+			"recordedAt" };
+
 	// In eventBody, removes the key instead of setting it.
 	private static final String ABSENT = "<absent>";
+
+	// Seeded by V2.
+	private static final String JATAI = "01a17fce-7800-77ac-81e1-875a2a5b870c";
+
+	private static final String BORA = "01a17fce-7801-7451-8827-2ebec51476ea";
 
 	private static final OffsetDateTime OCT_1 = OffsetDateTime.parse("2025-10-01T09:00:00-03:00");
 
@@ -96,7 +106,9 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertThat(response.getStatus()).isEqualTo(201);
 		assertThat(response.getHeader("Location")).isEqualTo(eventsPath(projectId, siteId) + "/" + eventId);
 		String body = bodyOf(response);
-		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys("id", "type", "occurredAt", "recordedAt");
+		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys(EVENT_KEYS)
+			.containsEntry("speciesId", null)
+			.containsEntry("identifiedEventId", null);
 		assertThat(JsonPath.<String>read(body, "$.id")).isEqualTo(eventId);
 		assertThat(JsonPath.<String>read(body, "$.type")).isEqualTo(type);
 		assertThat(Instant.parse(JsonPath.<String>read(body, "$.occurredAt"))).isEqualTo(occurredAt.toInstant());
@@ -154,15 +166,20 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 	}
 
 	@ParameterizedTest
-	@EnumSource(value = BaitSiteEventType.class, mode = EnumSource.Mode.EXCLUDE, names = "IDENTIFIED")
+	@EnumSource(BaitSiteEventType.class)
 	void anyEventBeforeTheFirstInstalledIsConflict(BaitSiteEventType type) throws Exception {
 		String subject = newSubject();
 		String projectId = newProject(subject);
 		String siteId = newSite(subject, projectId);
 		String eventId = UuidV7.generate().toString();
+		OffsetDateTime beforeInstalled = OCT_1.minusDays(1);
+		// An IDENTIFIED with a real target, so the 409 comes from the replay and not from the target check.
+		String body = (type == BaitSiteEventType.IDENTIFIED)
+				? identifiedBody(eventId, recordOk(subject, projectId, siteId, "CAPTURED", OCT_5), beforeInstalled)
+				: eventBody("id", quoted(eventId), "type", quoted(type.name()), "occurredAt",
+						quoted(beforeInstalled.toString()));
 
-		assertProblem(postEvent(subject, projectId, siteId, eventBody("id", quoted(eventId), "type", quoted(type.name()),
-				"occurredAt", quoted(OCT_1.minusDays(1).toString()))), 409, "INVALID_EVENT_SEQUENCE");
+		assertProblem(postEvent(subject, projectId, siteId, body), 409, "INVALID_EVENT_SEQUENCE");
 
 		assertThat(eventExists(eventId)).isFalse();
 	}
@@ -229,6 +246,187 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertThat(eventExists(low)).isFalse();
 	}
 
+	// Species on a capture
+
+	@ParameterizedTest
+	@ValueSource(strings = { ABSENT, "null" })
+	void captureWithoutASpeciesIsUnidentified(String speciesId) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String eventId = UuidV7.generate().toString();
+
+		MockHttpServletResponse response = postEvent(subject, projectId, siteId,
+				eventBody("id", quoted(eventId), "type", quoted("CAPTURED"), "speciesId", speciesId));
+
+		assertThat(response.getStatus()).isEqualTo(201);
+		assertThat(JsonPath.<Map<String, Object>>read(bodyOf(response), "$")).containsEntry("speciesId", null);
+		assertThat(storedEvent(eventId).get("species_id")).isNull();
+	}
+
+	@Test
+	void captureWithASpeciesIsStoredAndReturnedInPostListAndGet() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String eventId = UuidV7.generate().toString();
+
+		MockHttpServletResponse response = postEvent(subject, projectId, siteId,
+				eventBody("id", quoted(eventId), "type", quoted("CAPTURED"), "speciesId", quoted(JATAI)));
+
+		assertThat(response.getStatus()).isEqualTo(201);
+		assertThat(JsonPath.<String>read(bodyOf(response), "$.speciesId")).isEqualTo(JATAI);
+		assertThat(storedEvent(eventId).get("species_id")).isEqualTo(UUID.fromString(JATAI));
+		assertThat(JsonPath.<String>read(bodyOf(getEvent(subject, projectId, siteId, eventId)), "$.speciesId"))
+			.isEqualTo(JATAI);
+		assertThat(JsonPath.<List<String>>read(bodyOf(perform(get(eventsPath(projectId, siteId)), subject)),
+				"$.items[?(@.id == '" + eventId + "')].speciesId"))
+			.containsExactly(JATAI);
+	}
+
+	// IDENTIFIED
+
+	@Test
+	void identifiedIsStoredAndReturnedAndLeavesTheStatusUnchanged() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		String eventId = UuidV7.generate().toString();
+
+		MockHttpServletResponse response = postEvent(subject, projectId, siteId,
+				identifiedBody(eventId, captureId, OCT_10));
+
+		assertThat(response.getStatus()).isEqualTo(201);
+		String body = bodyOf(response);
+		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys(EVENT_KEYS)
+			.containsEntry("type", "IDENTIFIED")
+			.containsEntry("speciesId", JATAI)
+			.containsEntry("identifiedEventId", captureId);
+		Map<String, Object> stored = storedEvent(eventId);
+		assertThat(stored.get("species_id")).isEqualTo(UUID.fromString(JATAI));
+		assertThat(stored.get("identified_event_id")).isEqualTo(UUID.fromString(captureId));
+		assertThat(JsonPath.<Map<String, Object>>read(bodyOf(getEvent(subject, projectId, siteId, eventId)), "$"))
+			.isEqualTo(JsonPath.<Map<String, Object>>read(body, "$"));
+		assertThat(JsonPath.<List<String>>read(bodyOf(perform(get(eventsPath(projectId, siteId)), subject)),
+				"$.items[?(@.id == '" + eventId + "')].identifiedEventId"))
+			.containsExactly(captureId);
+		assertThat(status(subject, projectId, siteId)).isEqualTo("CAPTURED");
+	}
+
+	@Test
+	void identifiedOfACaptureFromAClosedCycleWorksOnAnEmptySite() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		recordOk(subject, projectId, siteId, "COLLECTED", OCT_5.plusDays(1));
+
+		assertThat(postEvent(subject, projectId, siteId, identifiedBody(UuidV7.generate().toString(), captureId, OCT_10))
+			.getStatus()).isEqualTo(201);
+
+		assertThat(status(subject, projectId, siteId)).isEqualTo("EMPTY");
+	}
+
+	@Test
+	void twoIdentifiedOnTheSameCaptureAreBothRecorded() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		String first = UuidV7.generate().toString();
+		String correction = UuidV7.generate().toString();
+
+		assertThat(postEvent(subject, projectId, siteId, identifiedBody(first, captureId, OCT_10)).getStatus())
+			.isEqualTo(201);
+		assertThat(postEvent(subject, projectId, siteId,
+				eventBody("id", quoted(correction), "type", quoted("IDENTIFIED"), "occurredAt",
+						quoted(OCT_10.plusDays(1).toString()), "speciesId", quoted(BORA), "identifiedEventId",
+						quoted(captureId)))
+			.getStatus()).isEqualTo(201);
+
+		assertThat(storedEvent(first).get("species_id")).isEqualTo(UUID.fromString(JATAI));
+		assertThat(storedEvent(correction).get("species_id")).isEqualTo(UUID.fromString(BORA));
+	}
+
+	@Test
+	void identifiedOfAnIdThatExistsNowhereIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+
+		assertTargetRejected(subject, projectId, newSite(subject, projectId), UuidV7.generate().toString(), OCT_10);
+	}
+
+	@Test
+	void identifiedOfAnEventOnAnotherSiteOfTheProjectIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String captureElsewhere = recordOk(subject, projectId, newSite(subject, projectId), "CAPTURED", OCT_5);
+
+		assertTargetRejected(subject, projectId, newSite(subject, projectId), captureElsewhere, OCT_10);
+	}
+
+	@Test
+	void identifiedOfAnEventInAnotherProjectIsConflict() throws Exception {
+		String otherOwner = newSubject();
+		String otherProject = newProject(otherOwner);
+		String captureElsewhere = recordOk(otherOwner, otherProject, newSite(otherOwner, otherProject), "CAPTURED", OCT_5);
+		String subject = newSubject();
+		String projectId = newProject(subject);
+
+		assertTargetRejected(subject, projectId, newSite(subject, projectId), captureElsewhere, OCT_10);
+	}
+
+	@Test
+	void identifiedOfTheInstalledIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String installed = this.jdbcClient.sql("SELECT id::text FROM bait_site_events WHERE bait_site_id = ?::uuid")
+			.param(siteId)
+			.query(String.class)
+			.single();
+
+		assertTargetRejected(subject, projectId, siteId, installed, OCT_10);
+	}
+
+	@Test
+	void identifiedOfAnotherIdentifiedIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		String identified = UuidV7.generate().toString();
+		assertThat(postEvent(subject, projectId, siteId, identifiedBody(identified, captureId, OCT_5.plusDays(1)))
+			.getStatus()).isEqualTo(201);
+
+		assertTargetRejected(subject, projectId, siteId, identified, OCT_10);
+	}
+
+	@Test
+	void identifiedOfACaptureThatOccurredLaterIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_10);
+
+		assertTargetRejected(subject, projectId, siteId, captureId, OCT_5);
+	}
+
+	// Nothing can be voided through the API yet, so this writes voided_at directly.
+	@Test
+	void identifiedOfAVoidedCaptureIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		this.jdbcClient.sql("UPDATE bait_site_events SET voided_at = now(), voided_by = ? WHERE id = ?::uuid")
+			.params(userId(subject), captureId)
+			.update();
+
+		assertTargetRejected(subject, projectId, siteId, captureId, OCT_10);
+	}
+
 	// Resend
 
 	@Test
@@ -250,6 +448,22 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertThat(confirmed.getStatus()).isEqualTo(200);
 		assertThat(JsonPath.<Map<String, Object>>read(bodyOf(confirmed), "$"))
 			.isEqualTo(JsonPath.<Map<String, Object>>read(bodyOf(first), "$"));
+		assertThat(eventCount(siteId)).isEqualTo(3);
+	}
+
+	@Test
+	void resendOfAStoredIdentifiedIsIdAlreadyExistsAndGetConfirmsIt() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		String eventId = UuidV7.generate().toString();
+		String body = identifiedBody(eventId, captureId, OCT_10);
+		assertThat(postEvent(subject, projectId, siteId, body).getStatus()).isEqualTo(201);
+
+		assertProblem(postEvent(subject, projectId, siteId, body), 409, "ID_ALREADY_EXISTS");
+
+		assertThat(getEvent(subject, projectId, siteId, eventId).getStatus()).isEqualTo(200);
 		assertThat(eventCount(siteId)).isEqualTo(3);
 	}
 
@@ -341,7 +555,10 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 
 		List<String> bodies = List.of(eventBody("id", quoted(newEventId), "type", quoted("CAPTURED")),
 				// Never a conflict or a validation error: either would say the request got past the access check.
-				eventBody("id", quoted(eventId)), eventBody("id", quoted("not-a-uuid"), "type", ABSENT));
+				eventBody("id", quoted(eventId)), eventBody("id", quoted("not-a-uuid"), "type", ABSENT),
+				// Above all an unknown species: the 400 would mean validation ran for someone outside the project.
+				eventBody("type", quoted("CAPTURED"), "speciesId", quoted(UuidV7.generate().toString())),
+				eventBody("type", quoted("IDENTIFIED"), "speciesId", quoted(JATAI), "identifiedEventId", quoted(eventId)));
 		for (String body : bodies) {
 			assertSame404(postEvent(stranger, projectId, siteId, body), postEvent(stranger, missingProject, siteId, body));
 		}
@@ -382,7 +599,6 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 				arguments("type", quoted(" CAPTURED "), "INVALID_FORMAT"),
 				arguments("type", quoted("captured"), "INVALID_FORMAT"),
 				arguments("type", quoted("UNKNOWN"), "INVALID_FORMAT"),
-				arguments("type", quoted("IDENTIFIED"), "INVALID_FORMAT"),
 
 				arguments("occurredAt", ABSENT, "REQUIRED"), arguments("occurredAt", "null", "REQUIRED"),
 				arguments("occurredAt", quoted(""), "REQUIRED"), arguments("occurredAt", quoted("   "), "REQUIRED"),
@@ -415,6 +631,129 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 	}
 
 	@ParameterizedTest
+	@MethodSource("speciesAndTargetRules")
+	void speciesAndTargetFollowTheRulesOfEachType(String type, String speciesId, String identifiedEventId, String field,
+			String code) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+
+		assertInvalid(postEvent(subject, projectId, siteId,
+				eventBody("type", quoted(type), "speciesId", speciesId, "identifiedEventId", identifiedEventId)),
+				Map.of(field, code));
+
+		assertThat(eventCount(siteId)).isEqualTo(1);
+	}
+
+	static Stream<Arguments> speciesAndTargetRules() {
+		String unknownSpecies = quoted(UuidV7.generate().toString());
+		String malformed = quoted("not-a-uuid");
+		String notV7 = quoted(UUID.randomUUID().toString());
+		// Well formed, and never looked up: validation stops first.
+		String target = quoted(UuidV7.generate().toString());
+		return Stream.of(arguments("CAPTURED", unknownSpecies, ABSENT, "speciesId", "INVALID_FORMAT"),
+				arguments("CAPTURED", malformed, ABSENT, "speciesId", "INVALID_FORMAT"),
+				arguments("CAPTURED", notV7, ABSENT, "speciesId", "INVALID_FORMAT"),
+				// On a capture, unidentified is said with null, not with a blank string.
+				arguments("CAPTURED", quoted(""), ABSENT, "speciesId", "INVALID_FORMAT"),
+				arguments("CAPTURED", quoted("   "), ABSENT, "speciesId", "INVALID_FORMAT"),
+
+				arguments("IDENTIFIED", unknownSpecies, target, "speciesId", "INVALID_FORMAT"),
+				arguments("IDENTIFIED", malformed, target, "speciesId", "INVALID_FORMAT"),
+				arguments("IDENTIFIED", ABSENT, target, "speciesId", "REQUIRED"),
+				arguments("IDENTIFIED", "null", target, "speciesId", "REQUIRED"),
+				arguments("IDENTIFIED", quoted(""), target, "speciesId", "REQUIRED"),
+				arguments("IDENTIFIED", quoted("   "), target, "speciesId", "REQUIRED"),
+
+				arguments("IDENTIFIED", quoted(JATAI), ABSENT, "identifiedEventId", "REQUIRED"),
+				arguments("IDENTIFIED", quoted(JATAI), "null", "identifiedEventId", "REQUIRED"),
+				arguments("IDENTIFIED", quoted(JATAI), quoted(""), "identifiedEventId", "REQUIRED"),
+				arguments("IDENTIFIED", quoted(JATAI), quoted("   "), "identifiedEventId", "REQUIRED"),
+				arguments("IDENTIFIED", quoted(JATAI), malformed, "identifiedEventId", "INVALID_FORMAT"),
+				arguments("IDENTIFIED", quoted(JATAI), notV7, "identifiedEventId", "INVALID_FORMAT"),
+
+				arguments("INSTALLED", quoted(JATAI), ABSENT, "speciesId", "NOT_ALLOWED"),
+				arguments("ACTIVITY", quoted(JATAI), ABSENT, "speciesId", "NOT_ALLOWED"),
+				arguments("LOST", quoted(JATAI), ABSENT, "speciesId", "NOT_ALLOWED"),
+				arguments("COLLECTED", quoted(JATAI), ABSENT, "speciesId", "NOT_ALLOWED"),
+				arguments("REMOVED", quoted(JATAI), ABSENT, "speciesId", "NOT_ALLOWED"),
+				arguments("INSPECTED", quoted(JATAI), ABSENT, "speciesId", "NOT_ALLOWED"),
+				// Sent is present and not null, whatever the value.
+				arguments("ACTIVITY", quoted(""), ABSENT, "speciesId", "NOT_ALLOWED"),
+				arguments("ACTIVITY", malformed, ABSENT, "speciesId", "NOT_ALLOWED"),
+
+				arguments("CAPTURED", ABSENT, target, "identifiedEventId", "NOT_ALLOWED"),
+				arguments("INSPECTED", ABSENT, target, "identifiedEventId", "NOT_ALLOWED"),
+				arguments("CAPTURED", ABSENT, quoted(""), "identifiedEventId", "NOT_ALLOWED"));
+	}
+
+	// Upper case too: it is the same row, and comparing the raw strings would let it reach the CHECK constraint, a 500.
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void identifiedPointingToItselfIsAFieldError(boolean upperCaseTarget) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String eventId = UuidV7.generate().toString();
+		String target = upperCaseTarget ? eventId.toUpperCase(Locale.ROOT) : eventId;
+
+		assertInvalid(postEvent(subject, projectId, siteId, identifiedBody(eventId, target, OCT_10)),
+				Map.of("identifiedEventId", "INVALID_FORMAT"));
+
+		assertThat(eventExists(eventId)).isFalse();
+	}
+
+	@Test
+	void nullIsTheSameAsAbsentOnATypeThatDoesNotTakeTheField() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+
+		assertThat(postEvent(subject, projectId, siteId,
+				eventBody("type", quoted("ACTIVITY"), "speciesId", "null", "identifiedEventId", "null"))
+			.getStatus()).isEqualTo(201);
+		assertThat(postEvent(subject, projectId, siteId,
+				eventBody("type", quoted("CAPTURED"), "identifiedEventId", "null", "occurredAt",
+						quoted(OCT_10.plusDays(1).toString())))
+			.getStatus()).isEqualTo(201);
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { ABSENT, "\"UNKNOWN\"" })
+	void withoutAValidTypeOnlyTheTypeIsReported(String type) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+
+		assertInvalid(
+				postEvent(subject, projectId, newSite(subject, projectId),
+						eventBody("type", type, "speciesId", quoted("not-a-uuid"), "identifiedEventId", quoted("not-a-uuid"))),
+				Map.of("type", ABSENT.equals(type) ? "REQUIRED" : "INVALID_FORMAT"));
+	}
+
+	@Test
+	void allInvalidFieldsOfAnIdentifiedAreReportedInOneResponse() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+
+		assertInvalid(
+				postEvent(subject, projectId, newSite(subject, projectId),
+						eventBody("id", quoted("not-a-uuid"), "type", quoted("IDENTIFIED"), "occurredAt", quoted("garbage"),
+								"speciesId", quoted(UuidV7.generate().toString()), "identifiedEventId", ABSENT)),
+				Map.of("id", "INVALID_FORMAT", "occurredAt", "INVALID_FORMAT", "speciesId", "INVALID_FORMAT",
+						"identifiedEventId", "REQUIRED"));
+	}
+
+	@Test
+	void unknownSpeciesIsReportedBeforeTheSiteIsLookedUp() throws Exception {
+		String subject = newSubject();
+
+		assertInvalid(
+				postEvent(subject, newProject(subject), UuidV7.generate().toString(),
+						eventBody("type", quoted("CAPTURED"), "speciesId", quoted(UuidV7.generate().toString()))),
+				Map.of("speciesId", "INVALID_FORMAT"));
+	}
+
+	@ParameterizedTest
 	@MethodSource("malformedValues")
 	void wrongJsonTypeIsMalformedRequest(String key, String rawValue) throws Exception {
 		String subject = newSubject();
@@ -428,7 +767,7 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 
 	static Stream<Arguments> malformedValues() {
 		return Stream.of(arguments("type", "5"), arguments("type", "true"), arguments("id", "5"),
-				arguments("occurredAt", "1730000000"));
+				arguments("occurredAt", "1730000000"), arguments("speciesId", "5"), arguments("identifiedEventId", "5"));
 	}
 
 	// Status
@@ -473,14 +812,16 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 			.params(siteId, projectId, userId)
 			.update();
 		OffsetDateTime occurredAt = OCT_1;
-		for (BaitSiteEventType event : testCase.events()) {
+		for (BaitSiteHistoryEvent event : testCase.history()) {
 			occurredAt = occurredAt.plusHours(1);
+			UUID speciesId = (event.type() == BaitSiteEventType.IDENTIFIED) ? UUID.fromString(JATAI) : null;
 			this.jdbcClient
 				.sql("""
-						INSERT INTO bait_site_events (id, bait_site_id, event_type, occurred_at, recorded_by)
-						VALUES (?, ?::uuid, ?, ?, ?)
+						INSERT INTO bait_site_events
+							(id, bait_site_id, event_type, occurred_at, recorded_by, species_id, identified_event_id)
+						VALUES (?, ?::uuid, ?, ?, ?, ?, ?)
 						""")
-				.params(UuidV7.generate(), siteId, event.name(), occurredAt, userId)
+				.params(event.id(), siteId, event.type().name(), occurredAt, userId, speciesId, event.identifiedEventId())
 				.update();
 		}
 
@@ -512,8 +853,7 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys("items");
 		assertThat(JsonPath.<List<String>>read(body, "$.items[*].id")).containsExactly(installed, activity, captured);
 		assertThat(JsonPath.<List<String>>read(body, "$.items[*].type")).containsExactly("INSTALLED", "ACTIVITY", "CAPTURED");
-		assertThat(JsonPath.<Map<String, Object>>read(body, "$.items[0]")).containsOnlyKeys("id", "type", "occurredAt",
-				"recordedAt");
+		assertThat(JsonPath.<Map<String, Object>>read(body, "$.items[0]")).containsOnlyKeys(EVENT_KEYS);
 	}
 
 	// Nothing can be voided through the API yet, so this writes voided_at directly.
@@ -563,6 +903,16 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		String list = bodyOf(perform(get(sitesPath(projectId)), subject));
 		assertThat(JsonPath.<List<String>>read(list, "$.items[?(@.id == '" + siteId + "')].status"))
 			.containsExactly(expected);
+	}
+
+	private void assertTargetRejected(String subject, String projectId, String siteId, String target,
+			OffsetDateTime occurredAt) throws Exception {
+		String eventId = UuidV7.generate().toString();
+
+		assertProblem(postEvent(subject, projectId, siteId, identifiedBody(eventId, target, occurredAt)), 409,
+				"INVALID_EVENT_SEQUENCE");
+
+		assertThat(eventExists(eventId)).isFalse();
 	}
 
 	private void assertSame404(MockHttpServletResponse nonMember, MockHttpServletResponse missingProject)
@@ -710,6 +1060,11 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 			.collect(Collectors.joining(", ", "{", "}"));
 	}
 
+	private static String identifiedBody(String id, String target, OffsetDateTime occurredAt) {
+		return eventBody("id", quoted(id), "type", quoted("IDENTIFIED"), "occurredAt", quoted(occurredAt.toString()),
+				"speciesId", quoted(JATAI), "identifiedEventId", quoted(target));
+	}
+
 	/**
 	 * A valid UUID v7 with the given first 8 hex digits and a random end, so tests control how ids sort.
 	 */
@@ -749,6 +1104,10 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 			.param(siteId)
 			.query(Long.class)
 			.single();
+	}
+
+	private Map<String, Object> storedEvent(String eventId) {
+		return this.jdbcClient.sql("SELECT * FROM bait_site_events WHERE id = ?::uuid").param(eventId).query().singleRow();
 	}
 
 	private String storedType(String eventId) {
