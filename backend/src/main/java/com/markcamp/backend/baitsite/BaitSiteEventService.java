@@ -69,7 +69,7 @@ class BaitSiteEventService {
 	 * Insert first because, if the sequence were validated before the insert, a resend of an event that is already stored
 	 * would enter the replay twice (e.g. two COLLECTED), fail as an invalid sequence, and the client would give up on an
 	 * event that was in fact saved. Inserting first makes that resend a 409 ID_ALREADY_EXISTS, which the client confirms
-	 * with a GET. Voiding (slice B2) will reuse the same pattern: change, validate the resulting history, roll back if
+	 * with a GET. {@link #voidEvent} follows the same pattern: change, validate the resulting history, roll back if
 	 * invalid.
 	 * <p>
 	 * The target check of an IDENTIFIED comes before the insert and keeps that guarantee: events are never deleted, so the
@@ -85,6 +85,41 @@ class BaitSiteEventService {
 		if (this.eventRepository.insertIfAbsent(id, type.name(), occurredAt, speciesId, identifiedEventId, site) == 0) {
 			throw new IdAlreadyExistsException();
 		}
+		requireValidHistory(site);
+	}
+
+	/**
+	 * Voids one event, or does nothing if it is already voided (ADR 0006: voiding is idempotent). The replay decides what
+	 * can be voided: an event that later events depend on leaves an invalid history, with no rule specific to voiding.
+	 * <p>
+	 * The lock matters here too: without it, voiding a CAPTURED and recording an IDENTIFIED that points to it can each pass
+	 * their replay and commit together (write skew).
+	 */
+	@Transactional
+	BaitSiteEventResponse voidEvent(UUID userId, UUID projectId, UUID baitSiteId, UUID eventId) {
+		ProjectMembership membership = this.projectAccess.requireMember(userId, projectId);
+		LockedBaitSite site = this.baitSiteLock.acquire(baitSiteId, membership);
+
+		boolean voidedNow = this.eventRepository.voidIfNotVoided(eventId, site) == 1;
+		if (voidedNow) {
+			requireValidHistory(site);
+		}
+		else if (!this.eventRepository.existsOnSite(eventId, site)) {
+			throw new BaitSiteEventNotFoundException();
+		}
+
+		// Read back because the database sets voided_at. A projection, so it hits the database: nothing in this transaction
+		// loads a BaitSiteEvent entity that could hold a stale voidedAt.
+		BaitSiteEventRow event = this.eventRepository.findInSite(eventId, site.baitSiteId(), membership).orElseThrow();
+		if (voidedNow) {
+			// Ids and type only: never the name or location of a site (personal data).
+			log.info("Bait site event voided: eventId={} baitSiteId={} projectId={} userId={} type={}", eventId,
+					site.baitSiteId(), membership.projectId(), membership.userId(), event.type());
+		}
+		return toResponse(event);
+	}
+
+	private void requireValidHistory(LockedBaitSite site) {
 		if (BaitSiteStateMachine.replay(this.eventRepository.findHistory(site)) instanceof BaitSiteStateMachine.Invalid) {
 			throw new InvalidEventSequenceException();
 		}
@@ -115,7 +150,7 @@ class BaitSiteEventService {
 
 	private static BaitSiteEventResponse toResponse(BaitSiteEventRow row) {
 		return new BaitSiteEventResponse(row.id(), row.type(), row.occurredAt(), row.speciesId(), row.identifiedEventId(),
-				row.recordedAt());
+				row.recordedAt(), row.voidedAt());
 	}
 
 }

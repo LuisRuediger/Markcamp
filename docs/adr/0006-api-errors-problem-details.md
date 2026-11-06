@@ -6,6 +6,7 @@
 - **Amended:** 2026-11-03 (bait site slice: added BAIT_SITE_NOT_FOUND; OUT_OF_RANGE also covers timestamps)
 - **Amended:** 2026-11-03 (bait site events slice: added BAIT_SITE_EVENT_NOT_FOUND and INVALID_EVENT_SEQUENCE; OUT_OF_RANGE wording now "outside its allowed window", same meaning)
 - **Amended:** 2026-11-06 (bait site events slice B1: added field code NOT_ALLOWED; INVALID_EVENT_SEQUENCE also covers an IDENTIFIED whose capture is not in the history)
+- **Amended:** 2026-11-06 (bait site events slice B2: INVALID_EVENT_SEQUENCE also covers a void; voiding is idempotent)
 
 ## Context
 
@@ -134,6 +135,13 @@ clients.** One exception: authentication failures (401), see below.
   to is not in the bait site's history as a non-voided `CAPTURED` that occurred before
   it. A capture the server does not have yet (rejected, or still unsynced on another
   device) is reported the same way: the identification may become valid later.
+- For a void, `INVALID_EVENT_SEQUENCE` means the event was not voided because later
+  events depend on it (e.g. an `IDENTIFIED` pointing to the capture). Void those first,
+  one at a time, then retry.
+- **Voiding is idempotent**: voiding an event that is already voided returns `200` with
+  the event as stored (the original `voidedAt` is kept). Unlike a create, a resend after
+  a lost response needs no `GET`: the request only asks for the event to be voided, and
+  it is.
 - The UI maps `code` (and field codes) to Portuguese text.
 
 ### Problem codes
@@ -149,7 +157,7 @@ clients.** One exception: authentication failures (401), see below.
 | No endpoint at this path | 404 | `RESOURCE_NOT_FOUND` |
 | Wrong HTTP method | 405 | `METHOD_NOT_ALLOWED` |
 | Create with an id that already exists | 409 | `ID_ALREADY_EXISTS` |
-| The event would make the bait site's history invalid under the state machine (ADR 0005), including when it is valid at its own position but breaks a later event, and an `IDENTIFIED` whose capture is not in the history | 409 | `INVALID_EVENT_SEQUENCE` |
+| The event, or voiding an event, would make the bait site's history invalid under the state machine (ADR 0005), including when it is valid at its own position but breaks a later event, and an `IDENTIFIED` whose capture is not in the history | 409 | `INVALID_EVENT_SEQUENCE` |
 | Wrong `Content-Type` | 415 | `UNSUPPORTED_MEDIA_TYPE` |
 | Any other client error raised by the framework | its status | `INVALID_REQUEST` |
 | Anything else | 500 | `INTERNAL_ERROR` |

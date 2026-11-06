@@ -4,6 +4,7 @@
 - **Date:** 2026-10-27
 - **Deciders:** Luis
 - **Amends:** ADR 0003 (entity name only; the decision stands)
+- **Amended:** 2026-11-06 (bait site events slice B2: a site whose events are all voided has status EMPTY; voided_at is set by the database)
 
 ## Context
 
@@ -69,6 +70,30 @@ Requirements and constraints:
   accepts anything, and a typo in a key silently drops data from statistics.
 
 With eight event types and one type-specific field (species), typed columns win.
+
+### Voiding an event that later events depend on (amendment, events slice B2)
+
+Voiding a `CAPTURED` that an `IDENTIFIED` points to, or an `INSTALLED` followed by a
+capture, leaves a history the state machine rejects.
+
+1. **Void the dependent events too (cascade).** One request for the person, but the
+   server would change rows the client did not ask for, so an offline copy would
+   silently differ from the server; and a cascade only makes sense for `IDENTIFIED`
+   (cascading from an `INSTALLED` would wipe a whole cycle), so there would be two
+   rules. Rejected.
+2. **Reject; the client voids the dependent events first.** One void changes one
+   event; the replay decides, with no rule specific to voiding. Chosen (already stated
+   under "Negative").
+
+### Voiding the only `INSTALLED` of a site (amendment, events slice B2)
+
+1. **Reject it.** A site created by mistake would stay `ARMED` forever; the only way out
+   would be a `REMOVED`, which counts as a cycle that never existed. Rejected.
+2. **Allow it; a history with no non-voided event is valid and the status is
+   `EMPTY`.** Voiding is the only honest undo while deleting or archiving sites is out
+   of scope. "None" and `EMPTY` accept the same next events in practice (`INSTALLED`;
+   an `IDENTIFIED` needs an earlier capture). Chosen. Hiding a site from the map is a
+   separate feature (archiving).
 
 ## Decision
 
@@ -171,12 +196,16 @@ re-arming.
 1. **Immutability.** Events are never updated or deleted. The only allowed change is
    voiding: setting `voided_at` and `voided_by` once. A voided event is ignored by every
    status, validation and statistics calculation. Voiding cannot be undone.
+   `voided_at` is set by the database when the void is stored, like `recorded_at`.
+   Voiding an event that is already voided changes nothing.
 2. **Two timestamps.** `occurred_at` is when it happened in the field, sent by the
    client. `recorded_at` is set by the server when the row is stored. `occurred_at`
    must not be in the future beyond a small clock tolerance (configurable, initially
    10 minutes).
 3. **Status is derived** from the latest non-voided state-changing event by
    `occurred_at`, with `id` (UUID v7) as tie-breaker, using the status table above.
+   A site with no non-voided state-changing event has status `EMPTY`; this only happens
+   when all its events are voided, because no other such history replays as valid.
 4. **Species columns.**
    - `species_id` may be set only on `CAPTURED` (optional: null means unidentified) and
      `IDENTIFIED` (required).

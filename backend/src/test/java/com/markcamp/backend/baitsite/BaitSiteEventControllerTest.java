@@ -62,7 +62,7 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 			"errors");
 
 	private static final String[] EVENT_KEYS = { "id", "type", "occurredAt", "speciesId", "identifiedEventId",
-			"recordedAt" };
+			"recordedAt", "voidedAt" };
 
 	// In eventBody, removes the key instead of setting it.
 	private static final String ABSENT = "<absent>";
@@ -108,7 +108,8 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		String body = bodyOf(response);
 		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys(EVENT_KEYS)
 			.containsEntry("speciesId", null)
-			.containsEntry("identifiedEventId", null);
+			.containsEntry("identifiedEventId", null)
+			.containsEntry("voidedAt", null);
 		assertThat(JsonPath.<String>read(body, "$.id")).isEqualTo(eventId);
 		assertThat(JsonPath.<String>read(body, "$.type")).isEqualTo(type);
 		assertThat(Instant.parse(JsonPath.<String>read(body, "$.occurredAt"))).isEqualTo(occurredAt.toInstant());
@@ -302,7 +303,8 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys(EVENT_KEYS)
 			.containsEntry("type", "IDENTIFIED")
 			.containsEntry("speciesId", JATAI)
-			.containsEntry("identifiedEventId", captureId);
+			.containsEntry("identifiedEventId", captureId)
+			.containsEntry("voidedAt", null);
 		Map<String, Object> stored = storedEvent(eventId);
 		assertThat(stored.get("species_id")).isEqualTo(UUID.fromString(JATAI));
 		assertThat(stored.get("identified_event_id")).isEqualTo(UUID.fromString(captureId));
@@ -413,16 +415,13 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertTargetRejected(subject, projectId, siteId, captureId, OCT_5);
 	}
 
-	// Nothing can be voided through the API yet, so this writes voided_at directly.
 	@Test
 	void identifiedOfAVoidedCaptureIsConflict() throws Exception {
 		String subject = newSubject();
 		String projectId = newProject(subject);
 		String siteId = newSite(subject, projectId);
 		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
-		this.jdbcClient.sql("UPDATE bait_site_events SET voided_at = now(), voided_by = ? WHERE id = ?::uuid")
-			.params(userId(subject), captureId)
-			.update();
+		assertThat(voidEvent(subject, projectId, siteId, captureId).getStatus()).isEqualTo(200);
 
 		assertTargetRejected(subject, projectId, siteId, captureId, OCT_10);
 	}
@@ -565,9 +564,11 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertSame404(perform(get(eventsPath(projectId, siteId)), stranger),
 				perform(get(eventsPath(missingProject, siteId)), stranger));
 		assertSame404(getEvent(stranger, projectId, siteId, eventId), getEvent(stranger, missingProject, siteId, eventId));
+		assertSame404(voidEvent(stranger, projectId, siteId, eventId), voidEvent(stranger, missingProject, siteId, eventId));
 
 		assertThat(eventExists(newEventId)).isFalse();
 		assertThat(eventCount(siteId)).isEqualTo(eventsBefore);
+		assertNotVoided(eventId);
 	}
 
 	// Validation
@@ -853,25 +854,278 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys("items");
 		assertThat(JsonPath.<List<String>>read(body, "$.items[*].id")).containsExactly(installed, activity, captured);
 		assertThat(JsonPath.<List<String>>read(body, "$.items[*].type")).containsExactly("INSTALLED", "ACTIVITY", "CAPTURED");
-		assertThat(JsonPath.<Map<String, Object>>read(body, "$.items[0]")).containsOnlyKeys(EVENT_KEYS);
+		assertThat(JsonPath.<Map<String, Object>>read(body, "$.items[0]")).containsOnlyKeys(EVENT_KEYS)
+			.containsEntry("voidedAt", null);
 	}
 
-	// Nothing can be voided through the API yet, so this writes voided_at directly.
 	@Test
 	void voidedEventsAreIgnoredByTheListTheStatusAndTheReplay() throws Exception {
 		String subject = newSubject();
 		String projectId = newProject(subject);
 		String siteId = newSite(subject, projectId);
 		String captured = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
-		this.jdbcClient.sql("UPDATE bait_site_events SET voided_at = now(), voided_by = ? WHERE id = ?::uuid")
-			.params(userId(subject), captured)
-			.update();
+		assertThat(voidEvent(subject, projectId, siteId, captured).getStatus()).isEqualTo(200);
 
 		assertThat(listedTypes(subject, projectId, siteId)).containsExactly("INSTALLED");
 		assertThat(status(subject, projectId, siteId)).isEqualTo("ARMED");
 		assertProblem(postEvent(subject, projectId, siteId,
 				eventBody("type", quoted("COLLECTED"), "occurredAt", quoted(OCT_10.toString()))), 409,
 				"INVALID_EVENT_SEQUENCE");
+	}
+
+	// Void
+
+	@Test
+	void voidingSetsVoidedAtAndTakesTheEventOutOfTheListButNotOutOfGet() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String eventId = recordOk(subject, projectId, siteId, "INSPECTED", OCT_5);
+
+		// No body and no Content-Type: the path says everything.
+		MockHttpServletResponse response = voidEvent(subject, projectId, siteId, eventId);
+
+		assertThat(response.getStatus()).isEqualTo(200);
+		assertThat(response.getContentType()).isEqualTo(MediaType.APPLICATION_JSON_VALUE);
+		Map<String, Object> voided = JsonPath.read(bodyOf(response), "$");
+		assertThat(voided).containsOnlyKeys(EVENT_KEYS).containsEntry("id", eventId).containsEntry("type", "INSPECTED");
+		Map<String, Object> stored = storedEvent(eventId);
+		assertThat(Instant.parse((String) voided.get("voidedAt")))
+			.isEqualTo(((Timestamp) stored.get("voided_at")).toInstant());
+		assertThat(stored.get("voided_by")).isEqualTo(userId(subject));
+		MockHttpServletResponse confirmed = getEvent(subject, projectId, siteId, eventId);
+		assertThat(confirmed.getStatus()).isEqualTo(200);
+		assertThat(JsonPath.<Map<String, Object>>read(bodyOf(confirmed), "$")).isEqualTo(voided);
+		assertThat(listedTypes(subject, projectId, siteId)).containsExactly("INSTALLED");
+		assertThat(status(subject, projectId, siteId)).isEqualTo("ARMED");
+	}
+
+	@ParameterizedTest
+	@MethodSource("statusesBeforeACapture")
+	void voidingACaptureWithNothingAfterItRestoresTheStatus(List<String> prefix, String statusBefore) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		prefix.forEach((prefixType) -> recordOk(subject, projectId, siteId, prefixType, OCT_5));
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_10);
+		assertThat(status(subject, projectId, siteId)).isEqualTo("CAPTURED");
+
+		assertThat(voidEvent(subject, projectId, siteId, captureId).getStatus()).isEqualTo(200);
+
+		assertStatusInListAndGet(subject, projectId, siteId, statusBefore);
+	}
+
+	static Stream<Arguments> statusesBeforeACapture() {
+		return Stream.of(arguments(List.of(), "ARMED"), arguments(List.of("ACTIVITY"), "ACTIVE"));
+	}
+
+	// now() differs per transaction, so an overwrite would change voided_at.
+	@Test
+	void voidingAgainReturnsTheStoredEventAndChangesNothing(CapturedOutput output) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String eventId = recordOk(subject, projectId, siteId, "INSPECTED", OCT_5);
+
+		MockHttpServletResponse first = voidEvent(subject, projectId, siteId, eventId);
+		MockHttpServletResponse second = voidEvent(subject, projectId, siteId, eventId);
+
+		assertThat(first.getStatus()).isEqualTo(200);
+		assertThat(second.getStatus()).isEqualTo(200);
+		Map<String, Object> firstBody = JsonPath.read(bodyOf(first), "$");
+		assertThat(JsonPath.<Map<String, Object>>read(bodyOf(second), "$")).isEqualTo(firstBody);
+		assertThat(((Timestamp) storedEvent(eventId).get("voided_at")).toInstant())
+			.isEqualTo(Instant.parse((String) firstBody.get("voidedAt")));
+		assertThat(output.getOut().lines().filter((line) -> line.contains("Bait site event voided: eventId=" + eventId)))
+			.hasSize(1);
+	}
+
+	@Test
+	void voidingTheOnlyInstalledLeavesAnEmptySiteThatTakesANewInstalled() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = UuidV7.generate().toString();
+		String installed = UuidV7.generate().toString();
+		assertThat(createSite(subject, projectId, siteBody(siteId, installed, OCT_1)).getStatus()).isEqualTo(201);
+
+		assertThat(voidEvent(subject, projectId, siteId, installed).getStatus()).isEqualTo(200);
+
+		assertStatusInListAndGet(subject, projectId, siteId, "EMPTY");
+		assertThat(listedTypes(subject, projectId, siteId)).isEmpty();
+		assertProblem(postEvent(subject, projectId, siteId,
+				eventBody("type", quoted("INSPECTED"), "occurredAt", quoted(OCT_5.toString()))), 409,
+				"INVALID_EVENT_SEQUENCE");
+
+		recordOk(subject, projectId, siteId, "INSTALLED", OCT_5);
+
+		assertStatusInListAndGet(subject, projectId, siteId, "ARMED");
+		assertThat(listedTypes(subject, projectId, siteId)).containsExactly("INSTALLED");
+	}
+
+	// Rejected by the replay
+
+	@Test
+	void voidingACaptureWithAnIdentifiedIsConflictUntilTheIdentifiedIsVoided(CapturedOutput output) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		String identifiedId = UuidV7.generate().toString();
+		assertThat(postEvent(subject, projectId, siteId, identifiedBody(identifiedId, captureId, OCT_10)).getStatus())
+			.isEqualTo(201);
+
+		assertVoidRejected(subject, projectId, siteId, captureId);
+		assertThat(output.getOut()).doesNotContain("Bait site event voided: eventId=" + captureId);
+
+		assertThat(voidEvent(subject, projectId, siteId, identifiedId).getStatus()).isEqualTo(200);
+		assertThat(voidEvent(subject, projectId, siteId, captureId).getStatus()).isEqualTo(200);
+		assertThat(status(subject, projectId, siteId)).isEqualTo("ARMED");
+	}
+
+	@Test
+	void voidingAnInstalledFollowedByACaptureIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = UuidV7.generate().toString();
+		String installed = UuidV7.generate().toString();
+		assertThat(createSite(subject, projectId, siteBody(siteId, installed, OCT_1)).getStatus()).isEqualTo(201);
+		recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+
+		assertVoidRejected(subject, projectId, siteId, installed);
+	}
+
+	// INSTALLED, CAPTURED, INSTALLED: the re-arm would follow a CAPTURED.
+	@Test
+	void voidingALostFollowedByAReArmIsConflict() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		String lost = recordOk(subject, projectId, siteId, "LOST", OCT_5.plusDays(1));
+		recordOk(subject, projectId, siteId, "INSTALLED", OCT_10);
+
+		assertVoidRejected(subject, projectId, siteId, lost);
+	}
+
+	// Resend of a voided event
+
+	// The target is voided too, so only the order of the checks keeps this from being INVALID_EVENT_SEQUENCE (ADR 0006).
+	@Test
+	void resendOfAnIdentifiedWhoseCaptureIsVoidedIsIdAlreadyExistsAndGetConfirmsIt() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String captureId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+		String eventId = UuidV7.generate().toString();
+		String body = identifiedBody(eventId, captureId, OCT_10);
+		assertThat(postEvent(subject, projectId, siteId, body).getStatus()).isEqualTo(201);
+		assertThat(voidEvent(subject, projectId, siteId, eventId).getStatus()).isEqualTo(200);
+		assertThat(voidEvent(subject, projectId, siteId, captureId).getStatus()).isEqualTo(200);
+
+		assertProblem(postEvent(subject, projectId, siteId, body), 409, "ID_ALREADY_EXISTS");
+
+		MockHttpServletResponse confirmed = getEvent(subject, projectId, siteId, eventId);
+		assertThat(confirmed.getStatus()).isEqualTo(200);
+		assertThat(JsonPath.<String>read(bodyOf(confirmed), "$.voidedAt")).isNotBlank();
+	}
+
+	@ParameterizedTest
+	@MethodSource("typesWithAValidPrefix")
+	void resendOfAnyVoidedEventIsIdAlreadyExists(String type, List<String> prefix) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		prefix.forEach((prefixType) -> recordOk(subject, projectId, siteId, prefixType, OCT_5));
+		String eventId = UuidV7.generate().toString();
+		String body = eventBody("id", quoted(eventId), "type", quoted(type), "occurredAt", quoted(OCT_10.toString()));
+		assertThat(postEvent(subject, projectId, siteId, body).getStatus()).isEqualTo(201);
+		assertThat(voidEvent(subject, projectId, siteId, eventId).getStatus()).isEqualTo(200);
+
+		assertProblem(postEvent(subject, projectId, siteId, body), 409, "ID_ALREADY_EXISTS");
+
+		assertThat(eventCount(siteId)).isEqualTo(2 + prefix.size());
+	}
+
+	// Void: not found and access
+
+	@Test
+	void voidingAnEventThatIsNotOnTheSiteIsEventNotFoundWithTheSameBody() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String eventOfOtherSite = recordOk(subject, projectId, newSite(subject, projectId), "ACTIVITY", OCT_5);
+		String otherOwner = newSubject();
+		String otherProject = newProject(otherOwner);
+		String eventOfOtherProject = recordOk(otherOwner, otherProject, newSite(otherOwner, otherProject), "ACTIVITY",
+				OCT_5);
+
+		Map<String, Object> missing = assertProblem(voidEvent(subject, projectId, siteId, UuidV7.generate().toString()), 404,
+				"BAIT_SITE_EVENT_NOT_FOUND");
+		Map<String, Object> otherSite = assertProblem(voidEvent(subject, projectId, siteId, eventOfOtherSite), 404,
+				"BAIT_SITE_EVENT_NOT_FOUND");
+		Map<String, Object> otherProjectEvent = assertProblem(voidEvent(subject, projectId, siteId, eventOfOtherProject), 404,
+				"BAIT_SITE_EVENT_NOT_FOUND");
+
+		assertThat(withoutInstance(otherSite)).isEqualTo(withoutInstance(missing));
+		assertThat(withoutInstance(otherProjectEvent)).isEqualTo(withoutInstance(missing));
+		assertNotVoided(eventOfOtherSite);
+		assertNotVoided(eventOfOtherProject);
+	}
+
+	// BAIT_SITE_NOT_FOUND, not the BAIT_SITE_EVENT_NOT_FOUND of a GET: the void locks the site before it looks at the event,
+	// and the lock filters by project. The GET does both in one query, so it cannot tell which one was missing.
+	@Test
+	void voidingOnASiteThatIsNotInTheProjectIsSiteNotFoundWithTheSameBody() throws Exception {
+		String subject = newSubject();
+		String projectWithSite = newProject(subject);
+		String otherProject = newProject(subject);
+		String siteId = newSite(subject, projectWithSite);
+		String eventId = recordOk(subject, projectWithSite, siteId, "ACTIVITY", OCT_5);
+		String otherOwner = newSubject();
+		String strangerProject = newProject(otherOwner);
+		String strangerSite = newSite(otherOwner, strangerProject);
+		String strangerEvent = recordOk(otherOwner, strangerProject, strangerSite, "ACTIVITY", OCT_5);
+
+		Map<String, Object> missingSite = assertProblem(
+				voidEvent(subject, projectWithSite, UuidV7.generate().toString(), eventId), 404, "BAIT_SITE_NOT_FOUND");
+		// The caller is a member of both projects, so only the project filter of the lock can stop this.
+		Map<String, Object> siteInOtherProject = assertProblem(voidEvent(subject, otherProject, siteId, eventId), 404,
+				"BAIT_SITE_NOT_FOUND");
+		Map<String, Object> siteOfAStranger = assertProblem(voidEvent(subject, otherProject, strangerSite, strangerEvent),
+				404, "BAIT_SITE_NOT_FOUND");
+
+		assertThat(withoutInstance(siteInOtherProject)).isEqualTo(withoutInstance(missingSite));
+		assertThat(withoutInstance(siteOfAStranger)).isEqualTo(withoutInstance(missingSite));
+		assertNotVoided(eventId);
+		assertNotVoided(strangerEvent);
+	}
+
+	@Test
+	void malformedEventIdIsTheSameMalformedRequestAsInGet() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+
+		Map<String, Object> onVoid = assertProblem(voidEvent(subject, projectId, siteId, "not-a-uuid"), 400,
+				"MALFORMED_REQUEST");
+		Map<String, Object> onGet = assertProblem(getEvent(subject, projectId, siteId, "not-a-uuid"), 400,
+				"MALFORMED_REQUEST");
+
+		assertThat(withoutInstance(onVoid)).isEqualTo(withoutInstance(onGet));
+	}
+
+	@Test
+	void voidPathTakesOnlyAuthenticatedPost() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		String eventId = recordOk(subject, projectId, siteId, "ACTIVITY", OCT_5);
+		String voidPath = eventsPath(projectId, siteId) + "/" + eventId + "/void";
+
+		assertProblem(perform(get(voidPath), subject), 405, "METHOD_NOT_ALLOWED");
+		assertThat(this.mockMvc.perform(post(voidPath)).andReturn().getResponse().getStatus()).isEqualTo(401);
+
+		assertNotVoided(eventId);
 	}
 
 	// Logging
@@ -895,6 +1149,38 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertThat(output.getOut().lines().filter((logLine) -> logLine.contains(line))).singleElement()
 			.satisfies((logLine) -> assertThat(logLine).contains("INFO"));
 		assertThat(output.getAll()).doesNotContain("Isca do Quintal", "26.91937", "49.06613", "eyJ");
+	}
+
+	@Test
+	void voidingLogsIdsAndTypeAndNeverNameOrCoordinates(CapturedOutput output) throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = UuidV7.generate().toString();
+		createSite(subject, projectId, """
+				{"id": "%s", "name": "Isca do Quintal", "latitude": -26.91937, "longitude": -49.06613,
+				"installation": {"id": "%s", "occurredAt": "%s"}}
+				""".formatted(siteId, UuidV7.generate(), OCT_1));
+		String eventId = recordOk(subject, projectId, siteId, "CAPTURED", OCT_5);
+
+		assertThat(voidEvent(subject, projectId, siteId, eventId).getStatus()).isEqualTo(200);
+
+		String line = "Bait site event voided: eventId=" + eventId + " baitSiteId=" + siteId + " projectId=" + projectId
+				+ " userId=" + userId(subject) + " type=CAPTURED";
+		assertThat(output.getOut().lines().filter((logLine) -> logLine.contains(line))).singleElement()
+			.satisfies((logLine) -> assertThat(logLine).contains("INFO"));
+		assertThat(output.getAll()).doesNotContain("Isca do Quintal", "26.91937", "49.06613", "eyJ");
+	}
+
+	private void assertVoidRejected(String subject, String projectId, String siteId, String eventId) throws Exception {
+		assertProblem(voidEvent(subject, projectId, siteId, eventId), 409, "INVALID_EVENT_SEQUENCE");
+
+		assertNotVoided(eventId);
+	}
+
+	private void assertNotVoided(String eventId) {
+		Map<String, Object> stored = storedEvent(eventId);
+		assertThat(stored.get("voided_at")).isNull();
+		assertThat(stored.get("voided_by")).isNull();
 	}
 
 	private void assertStatusInListAndGet(String subject, String projectId, String siteId, String expected)
@@ -1014,6 +1300,11 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 	private MockHttpServletResponse getEvent(String subject, String projectId, String siteId, String eventId)
 			throws Exception {
 		return perform(get(eventsPath(projectId, siteId) + "/" + eventId), subject);
+	}
+
+	private MockHttpServletResponse voidEvent(String subject, String projectId, String siteId, String eventId)
+			throws Exception {
+		return perform(post(eventsPath(projectId, siteId) + "/" + eventId + "/void"), subject);
 	}
 
 	private String status(String subject, String projectId, String siteId) throws Exception {

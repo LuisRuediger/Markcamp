@@ -64,6 +64,7 @@
     { "name": "target is ACTIVITY", "events": [{ "type": "INSTALLED" }, { "type": "ACTIVITY", "label": "a1" }, { "type": "IDENTIFIED", "identifies": "a1" }], "valid": false, "firstInvalidIndex": 2 },
     { "name": "target is another IDENTIFIED", "events": [{ "type": "INSTALLED" }, { "type": "CAPTURED", "label": "c1" }, { "type": "IDENTIFIED", "label": "i1", "identifies": "c1" }, { "type": "IDENTIFIED", "identifies": "i1" }], "valid": false, "firstInvalidIndex": 3 },
     { "name": "target is a ghost: missing or voided", "events": [{ "type": "INSTALLED" }, { "type": "CAPTURED" }, { "type": "IDENTIFIED", "identifies": "ghost" }], "valid": false, "firstInvalidIndex": 2 },
-    { "name": "IDENTIFIED does not change the status after LOST", "events": [{ "type": "INSTALLED" }, { "type": "CAPTURED", "label": "c1" }, { "type": "LOST" }, { "type": "IDENTIFIED", "identifies": "c1" }], "valid": true, "status": "LOST" }
+    { "name": "IDENTIFIED does not change the status after LOST", "events": [{ "type": "INSTALLED" }, { "type": "CAPTURED", "label": "c1" }, { "type": "LOST" }, { "type": "IDENTIFIED", "identifies": "c1" }], "valid": true, "status": "LOST" },
+    { "name": "every event voided: empty history", "events": [], "valid": true, "status": "EMPTY" }
   ]
 }

@@ -33,13 +33,13 @@ final class BaitSiteStateMachine {
 	 */
 	static Replay replay(List<BaitSiteHistoryEvent> eventsInHistoryOrder) {
 		if (eventsInHistoryOrder.isEmpty()) {
-			// "None" is not a status, so there is nothing to answer. The replay always includes the event being written.
-			throw new IllegalArgumentException("There are no events to replay");
+			// Happens only when every event of a site is voided (ADR 0005, rule 3 as amended).
+			return new Valid(BaitSiteStatus.EMPTY);
 		}
 		// Null until the first event: "none" in the table of ADR 0005.
 		BaitSiteStatus status = null;
 		// Equality only, which is the same in Java and in Postgres. A voided capture needs no code here: the history has
-		// only non-voided events, so it never enters this set. Voiding (slice B2) relies on it.
+		// only non-voided events, so it never enters this set. Voiding relies on it.
 		Set<UUID> earlierCaptures = new HashSet<>();
 		for (int i = 0; i < eventsInHistoryOrder.size(); i++) {
 			BaitSiteHistoryEvent event = eventsInHistoryOrder.get(i);

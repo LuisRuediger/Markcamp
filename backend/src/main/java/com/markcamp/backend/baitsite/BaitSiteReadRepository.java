@@ -33,7 +33,6 @@ class BaitSiteReadRepository {
 		.toList();
 
 	// Returns the event type, not a status: a CASE here would be a third copy of the table of ADR 0005.
-	// voided_at is already filtered, although nothing can be voided yet.
 	private static final String SELECT_SITES = """
 			SELECT s.id, s.name, s.latitude, s.longitude, s.location_accuracy_m, s.created_at,
 				latest.event_type AS latest_status_event_type

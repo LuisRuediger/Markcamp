@@ -33,6 +33,24 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 			LockedBaitSite site);
 
 	/**
+	 * Voids the event if it is on this site and not voided yet. Returns the number of rows changed (0 or 1).
+	 * <p>
+	 * {@code voided_at IS NULL} is what makes a repeat a no-op: both columns are set once and never overwritten (ADR 0005,
+	 * rule 1).
+	 * <p>
+	 * {@code now()} in the database, like recorded_at. Not from the client or the Clock bean: voided_at takes no part in
+	 * ordering or validation, only audit, and the Clock bean exists for rules tested with a fixed time. Cost accepted: an
+	 * offline void shows the sync time.
+	 */
+	@Modifying
+	@Query(nativeQuery = true, value = """
+			UPDATE bait_site_events
+			SET voided_at = now(), voided_by = :#{#site.membership().userId()}
+			WHERE id = :id AND bait_site_id = :#{#site.baitSiteId()} AND voided_at IS NULL
+			""")
+	int voidIfNotVoided(UUID id, LockedBaitSite site);
+
+	/**
 	 * Whether the event is on this site: of any type, voided or not. An event of another site or project is not found.
 	 */
 	@Query("""
@@ -58,9 +76,13 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 			""")
 	List<BaitSiteHistoryEvent> findHistory(LockedBaitSite site);
 
+	/**
+	 * Without voided events, so voidedAt is always null here: a client that forgot to look at voidedAt would show a voided
+	 * event as real. A GET of one event still returns it.
+	 */
 	@Query("""
 			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.speciesId,
-				e.identifiedEventId, e.recordedAt)
+				e.identifiedEventId, e.recordedAt, e.voidedAt)
 			from BaitSiteEvent e
 			join BaitSite s on s.id = e.baitSiteId
 			where e.baitSiteId = :baitSiteId and s.projectId = :#{#membership.projectId()} and e.voidedAt is null
@@ -73,7 +95,7 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 	 */
 	@Query("""
 			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.speciesId,
-				e.identifiedEventId, e.recordedAt)
+				e.identifiedEventId, e.recordedAt, e.voidedAt)
 			from BaitSiteEvent e
 			join BaitSite s on s.id = e.baitSiteId
 			where e.id = :id and e.baitSiteId = :baitSiteId and s.projectId = :#{#membership.projectId()}

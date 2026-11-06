@@ -7,5 +7,5 @@ import java.util.UUID;
  * What the read queries return. Not {@link BaitSiteEventResponse}: renaming a JSON field must not change a query.
  */
 record BaitSiteEventRow(UUID id, BaitSiteEventType type, Instant occurredAt, UUID speciesId, UUID identifiedEventId,
-		Instant recordedAt) {
+		Instant recordedAt, Instant voidedAt) {
 }

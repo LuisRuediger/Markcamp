@@ -1,7 +1,6 @@
 package com.markcamp.backend.baitsite;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -142,8 +141,8 @@ class BaitSiteStateMachineTest {
 	}
 
 	@Test
-	void emptyHistoryHasNoAnswer() {
-		assertThatThrownBy(() -> BaitSiteStateMachine.replay(List.of())).isInstanceOf(IllegalArgumentException.class);
+	void emptyHistoryIsValidAndEmpty() {
+		assertThat(BaitSiteStateMachine.replay(List.of())).isEqualTo(new BaitSiteStateMachine.Valid(BaitSiteStatus.EMPTY));
 	}
 
 	/**
@@ -153,7 +152,8 @@ class BaitSiteStateMachineTest {
 	private static boolean coversIdentifiedFrom(String start, Case testCase) {
 		List<BaitSiteHistoryEvent> history = testCase.history();
 		int last = history.size() - 1;
-		if (history.get(last).type() != BaitSiteEventType.IDENTIFIED) {
+		// The empty history has no last event, so it covers no cell.
+		if (history.isEmpty() || history.get(last).type() != BaitSiteEventType.IDENTIFIED) {
 			return false;
 		}
 		if ("none".equals(start)) {

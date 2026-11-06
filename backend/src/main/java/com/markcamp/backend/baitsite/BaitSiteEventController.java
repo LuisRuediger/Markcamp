@@ -45,4 +45,12 @@ class BaitSiteEventController {
 		return this.eventService.get(user.id(), projectId, baitSiteId, eventId);
 	}
 
+	// POST on a sub-path because the other verbs say something false: DELETE would say the event is gone, but it stays and
+	// its GET still answers 200; PATCH would say events are editable, against ADR 0005 rule 1.
+	@PostMapping("/api/projects/{projectId}/bait-sites/{baitSiteId}/events/{eventId}/void")
+	BaitSiteEventResponse voidEvent(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID projectId,
+			@PathVariable UUID baitSiteId, @PathVariable UUID eventId) {
+		return this.eventService.voidEvent(user.id(), projectId, baitSiteId, eventId);
+	}
+
 }
