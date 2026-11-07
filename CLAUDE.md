@@ -13,13 +13,14 @@ This is a **learning project** run like a real product. The goal is to understan
 - Backend: Spring Boot (Maven) in `backend/`
 - Database: PostgreSQL via Docker Compose (`docker-compose.yml` at the root)
 - Schema migrations: Flyway
-- Frontend: not started yet (will live in `frontend/`)
+- Frontend: React + Vite (TypeScript) PWA in `frontend/` (ADR 0007). Layers: `src/core/` (pure TypeScript, no DOM, no React), `src/adapters/` (Dexie, fetch, Firebase), `src/ui/` (React). `ui` never imports `adapters`; `src/main.tsx` wires them. UI text only in `src/ui/i18n/pt-BR.ts`.
 
 ## Running locally
 
 ```
 docker compose up -d           # from the repo root
 cd backend && ./mvnw spring-boot:run
+cd frontend && npm install && npm run dev   # http://localhost:5173, proxies /api to :8080
 ```
 
 Credentials come from `.env` at the root (see `.env.example`).

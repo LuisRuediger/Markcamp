@@ -1,0 +1,69 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "oxc"],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "error",
+    "react/only-export-components": ["warn", { "allowConstantExport": true }]
+  },
+  // Layer boundaries (ADR 0007).
+  // Oxlint traps, both found by mutation experiments:
+  // - a negated group ("!../**") cancels every other pattern of the rule, so core uses regex;
+  // - a regex with lookahead does not compile and silently disables the pattern.
+  "overrides": [
+    {
+      "files": ["src/core/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              // Anything not relative, or a path through adapters, ui or main.
+              "regex": "^[^.]|(^|/)(adapters|ui|main)(/|\\.|$)",
+              "message": "core may import only other files in src/core/ (ADR 0007)."
+            }
+          ]
+        }]
+      }
+    },
+    {
+      "files": ["src/core/**/*.test.ts"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              // Same as above, except for the bare specifier "vitest", spelled out without lookahead.
+              "regex": "^([^.v]|v([^i]|$)|vi([^t]|$)|vit([^e]|$)|vite([^s]|$)|vites([^t]|$)|vitest.)|(^|/)(adapters|ui|main)(/|\\.|$)",
+              "message": "core tests may import only other files in src/core/ and vitest (ADR 0007)."
+            }
+          ]
+        }]
+      }
+    },
+    {
+      "files": ["src/adapters/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              "group": ["**/ui", "**/ui/**"],
+              "message": "adapters may not import ui. Wire them in src/main.tsx (ADR 0007)."
+            }
+          ]
+        }]
+      }
+    },
+    {
+      "files": ["src/ui/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              "group": ["**/adapters", "**/adapters/**"],
+              "message": "ui may not import adapters. Wire them in src/main.tsx (ADR 0007)."
+            }
+          ]
+        }]
+      }
+    }
+  ]
+}
