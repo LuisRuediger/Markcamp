@@ -21,6 +21,7 @@ This is a **learning project** run like a real product. The goal is to understan
 docker compose up -d           # from the repo root
 cd backend && ./mvnw spring-boot:run
 cd frontend && npm install && npm run dev   # http://localhost:5173, proxies /api to :8080
+cp frontend/.env.example frontend/.env.local   # then fill in the Firebase web config
 ```
 
 Credentials come from `.env` at the root (see `.env.example`).

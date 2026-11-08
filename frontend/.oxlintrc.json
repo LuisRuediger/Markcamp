@@ -12,6 +12,14 @@
   // - a regex with lookahead does not compile and silently disables the pattern.
   "overrides": [
     {
+      // A stray console.log of a token or a Firebase user is the most likely way a
+      // credential ends up somewhere it should not.
+      "files": ["src/**"],
+      "rules": {
+        "no-console": ["error", { "allow": ["warn", "error"] }]
+      }
+    },
+    {
       "files": ["src/core/**"],
       "rules": {
         "no-restricted-imports": ["error", {
