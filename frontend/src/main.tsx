@@ -4,8 +4,10 @@ import { createRoot } from 'react-dom/client'
 import { createConsoleLogger } from './adapters/consoleLogger'
 import { createFetchTransport } from './adapters/fetchTransport'
 import { createFirebaseAuth } from './adapters/firebaseAuth'
+import { createUuidV7Generator } from './adapters/uuidV7Generator'
 import { createApiClient } from './core/apiClient'
 import { parseFirebaseConfig } from './core/config'
+import { createProjectsStore } from './core/projectsStore'
 import { createSessionStore } from './core/sessionStore'
 import App from './ui/App'
 import ConfigErrorScreen from './ui/ConfigErrorScreen'
@@ -26,11 +28,13 @@ const firebaseConfig = parseFirebaseConfig({
 if (firebaseConfig.ok) {
   const auth = createFirebaseAuth(firebaseConfig.config)
   const api = createApiClient(auth, createFetchTransport(API_BASE))
-  const store = createSessionStore(auth, api, createConsoleLogger())
+  const logger = createConsoleLogger()
+  const store = createSessionStore(auth, api, logger)
+  const projects = createProjectsStore(store, api, createUuidV7Generator(), logger)
 
   root.render(
     <StrictMode>
-      <App store={store} />
+      <App store={store} projects={projects} />
     </StrictMode>,
   )
 } else {

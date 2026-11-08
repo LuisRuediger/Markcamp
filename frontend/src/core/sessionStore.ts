@@ -21,11 +21,18 @@ export interface SessionStore {
   signOut(): Promise<void>
 }
 
+/** What other core stores need to follow the session, without seeing who is signed in. */
+export interface SessionKeySource {
+  subscribe(listener: () => void): () => void
+  /** null when not signed in; a different value for every new session, including a direct account switch. */
+  getSessionKey(): number | null
+}
+
 export function createSessionStore(
   auth: AuthPort,
   api: ApiClient,
   logger: Logger,
-): SessionStore & { getUserId(): string | null } {
+): SessionStore & SessionKeySource & { getUserId(): string | null } {
   let snapshot: SessionSnapshot = { status: 'loading' }
   // Memory only. Which key marks the owner of outbox entries is decided in slice F2.
   let userId: string | null = null
@@ -117,6 +124,8 @@ export function createSessionStore(
     },
     getSnapshot: () => snapshot,
     getUserId: () => userId,
+    // generation is bumped before every session change is published, so listeners already see the new key.
+    getSessionKey: () => (snapshot.status === 'signedIn' ? generation : null),
     signInWithEmail: (email, password) => attemptSignIn(() => auth.signInWithEmail(email, password)),
     signInWithGoogle: () => attemptSignIn(() => auth.signInWithGoogle()),
     async signOut() {

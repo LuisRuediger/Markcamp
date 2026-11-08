@@ -41,6 +41,12 @@ export interface Logger {
   warn(message: string): void
 }
 
+/** Implemented in adapters: core may not import npm packages nor use crypto (ADR 0007). */
+export interface IdGenerator {
+  /** A new UUID v7 in canonical lowercase form (ADR 0002). */
+  newId(): string
+}
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface TransportRequest {

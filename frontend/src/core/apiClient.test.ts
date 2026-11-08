@@ -122,7 +122,75 @@ describe('non-2xx responses', () => {
 
     const result = await client.request(ME)
 
-    expect(result).toEqual({ kind: 'apiError', status: 404, code: 'PROJECT_NOT_FOUND' })
+    expect(result).toEqual({
+      kind: 'apiError',
+      status: 404,
+      code: 'PROJECT_NOT_FOUND',
+      fieldErrors: [],
+    })
+  })
+
+  test('the errors array becomes fieldErrors', async () => {
+    const { client } = setup({
+      status: 400,
+      body: {
+        code: 'VALIDATION_FAILED',
+        errors: [
+          { field: 'name', code: 'TOO_LONG' },
+          { field: 'id', code: 'INVALID_FORMAT' },
+        ],
+      },
+    })
+
+    const result = await client.request(ME)
+
+    expect(result).toEqual({
+      kind: 'apiError',
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      fieldErrors: [
+        { field: 'name', code: 'TOO_LONG' },
+        { field: 'id', code: 'INVALID_FORMAT' },
+      ],
+    })
+  })
+
+  test('malformed errors entries are dropped and extra members are not kept', async () => {
+    const { client } = setup({
+      status: 400,
+      body: {
+        code: 'VALIDATION_FAILED',
+        errors: [
+          null,
+          'name',
+          { field: 'name' },
+          { code: 'REQUIRED' },
+          { field: 1, code: 'REQUIRED' },
+          { field: 'name', code: false },
+          { field: 'name', code: 'REQUIRED', detail: 'must not be blank' },
+        ],
+      },
+    })
+
+    const result = await client.request(ME)
+
+    expect(result).toEqual({
+      kind: 'apiError',
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      fieldErrors: [{ field: 'name', code: 'REQUIRED' }],
+    })
+  })
+
+  test.each([
+    ['no errors member', { code: 'VALIDATION_FAILED' }],
+    ['errors that is not an array', { code: 'VALIDATION_FAILED', errors: { field: 'name' } }],
+  ])('%s gives an empty fieldErrors', async (_name, body) => {
+    const { client } = setup({ status: 400, body })
+
+    const result = await client.request(ME)
+
+    expect(result).toEqual({ kind: 'apiError', status: 400, code: 'VALIDATION_FAILED', fieldErrors: [] })
   })
 
   test.each([
@@ -134,6 +202,6 @@ describe('non-2xx responses', () => {
 
     const result = await client.request(ME)
 
-    expect(result).toEqual({ kind: 'apiError', status: 502, code: null })
+    expect(result).toEqual({ kind: 'apiError', status: 502, code: null, fieldErrors: [] })
   })
 })

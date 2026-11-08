@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react'
+import type { ProjectsStore } from '../core/projectsStore'
 import type { SessionStore } from '../core/sessionStore'
 import HomeScreen from './HomeScreen'
 import { ptBR } from './i18n/pt-BR'
@@ -6,9 +7,10 @@ import SignInScreen from './SignInScreen'
 
 interface AppProps {
   store: SessionStore
+  projects: ProjectsStore
 }
 
-function App({ store }: AppProps) {
+function App({ store, projects }: AppProps) {
   const session = useSyncExternalStore(store.subscribe, store.getSnapshot)
 
   switch (session.status) {
@@ -21,7 +23,14 @@ function App({ store }: AppProps) {
     case 'signedOut':
       return <SignInScreen store={store} notice={session.notice} />
     case 'signedIn':
-      return <HomeScreen store={store} email={session.email} backend={session.backend} />
+      return (
+        <HomeScreen
+          store={store}
+          projects={projects}
+          email={session.email}
+          backend={session.backend}
+        />
+      )
   }
 }
 

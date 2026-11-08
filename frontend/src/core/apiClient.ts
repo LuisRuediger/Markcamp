@@ -12,9 +12,20 @@ export interface ApiRequest {
   readonly body?: unknown
 }
 
+/** One entry of the Problem Details errors array (ADR 0006). */
+export interface FieldError {
+  readonly field: string
+  readonly code: string
+}
+
 export type ApiResult =
   | { readonly kind: 'ok'; readonly status: number; readonly body: unknown }
-  | { readonly kind: 'apiError'; readonly status: number; readonly code: string | null }
+  | {
+      readonly kind: 'apiError'
+      readonly status: number
+      readonly code: string | null
+      readonly fieldErrors: readonly FieldError[]
+    }
   | { readonly kind: 'unauthorized' }
   | { readonly kind: 'unavailable' }
 
@@ -27,6 +38,21 @@ export interface ApiClient {
 function problemCode(body: unknown): string | null {
   if (typeof body !== 'object' || body === null || !('code' in body)) return null
   return typeof body.code === 'string' ? body.code : null
+}
+
+/** Keeps only well-formed entries, so callers can trust both strings. */
+function problemFieldErrors(body: unknown): readonly FieldError[] {
+  if (typeof body !== 'object' || body === null || !('errors' in body)) return []
+  const errors: unknown = body.errors
+  if (!Array.isArray(errors)) return []
+  const result: FieldError[] = []
+  for (const entry of errors as readonly unknown[]) {
+    if (typeof entry !== 'object' || entry === null) continue
+    if (!('field' in entry) || !('code' in entry)) continue
+    const { field, code } = entry
+    if (typeof field === 'string' && typeof code === 'string') result.push({ field, code })
+  }
+  return result
 }
 
 export function createApiClient(
@@ -70,7 +96,12 @@ export function createApiClient(
         return { kind: 'ok', status: response.status, body: response.body }
       }
       // Only status and code leave here: title and detail are never for the UI (ADR 0006).
-      return { kind: 'apiError', status: response.status, code: problemCode(response.body) }
+      return {
+        kind: 'apiError',
+        status: response.status,
+        code: problemCode(response.body),
+        fieldErrors: problemFieldErrors(response.body),
+      }
     },
     setUnauthorizedHandler(handler) {
       unauthorizedHandler = handler

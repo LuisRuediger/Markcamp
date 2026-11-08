@@ -160,6 +160,55 @@ describe('GET /me', () => {
   })
 })
 
+describe('session key', () => {
+  test('null while loading and signed out, non-null signed in', () => {
+    const { store, emit } = setup()
+    expect(store.getSessionKey()).toBeNull()
+
+    emit(null)
+    expect(store.getSessionKey()).toBeNull()
+
+    emit(USER)
+    expect(store.getSessionKey()).not.toBeNull()
+  })
+
+  test('a direct switch from one user to another changes the key', () => {
+    const { store, emit } = setup()
+    emit(USER)
+    const first = store.getSessionKey()
+
+    emit({ email: 'other@example.com' })
+
+    expect(store.getSessionKey()).not.toBeNull()
+    expect(store.getSessionKey()).not.toBe(first)
+  })
+
+  test('sign-out then sign-in gives a new key', () => {
+    const { store, emit } = setup()
+    emit(USER)
+    const first = store.getSessionKey()
+
+    emit(null)
+    emit(USER)
+
+    expect(store.getSessionKey()).not.toBeNull()
+    expect(store.getSessionKey()).not.toBe(first)
+  })
+
+  test('listeners already see the new key when notified', () => {
+    const { store, emit } = setup()
+    const seen: (number | null)[] = []
+    store.subscribe(() => seen.push(store.getSessionKey()))
+
+    emit(USER)
+    emit({ email: 'other@example.com' })
+
+    expect(seen[0]).not.toBeNull()
+    expect(seen[1]).not.toBeNull()
+    expect(seen[1]).not.toBe(seen[0])
+  })
+})
+
 describe('actions', () => {
   test('signInWithEmail passes the values and returns null on success', async () => {
     const { store, auth, emit } = setup()

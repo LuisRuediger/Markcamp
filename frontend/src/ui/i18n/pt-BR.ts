@@ -1,3 +1,4 @@
+import type { CreateProjectFailure } from '../../core/projectsStore'
 import type { SignInFailureKind } from '../../core/sessionStore'
 
 export const ptBR = {
@@ -29,5 +30,22 @@ export const ptBR = {
     backendOk: 'Conectado',
     backendUnavailable: 'Servidor indisponível no momento',
     signOut: 'Sair',
+  },
+  projects: {
+    title: 'Projetos',
+    loading: 'Carregando projetos…',
+    unavailable: 'Não foi possível carregar os projetos',
+    retry: 'Tentar de novo',
+    empty: 'Crie seu primeiro projeto',
+    nameLabel: 'Nome do projeto',
+    create: 'Criar projeto',
+    errors: {
+      nameRequired: 'Informe um nome para o projeto',
+      nameTooLong: 'Nome muito longo (máximo de 100 caracteres)',
+      nameInvalid: 'O nome tem caracteres que não são permitidos',
+      // Must not say the project was not created: the response may have been lost.
+      unavailable: 'Sem conexão. Tente de novo',
+      unknown: 'Não foi possível criar o projeto. Tente de novo',
+    } satisfies Record<CreateProjectFailure, string>,
   },
 } as const
