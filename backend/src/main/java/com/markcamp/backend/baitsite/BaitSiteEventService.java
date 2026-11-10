@@ -140,6 +140,19 @@ class BaitSiteEventService {
 			.toList();
 	}
 
+	/**
+	 * Read only, so no lock. A project with no events is an empty list, not a 404: the access check already proved that
+	 * the project exists and the caller is a member.
+	 */
+	@Transactional(readOnly = true)
+	List<BaitSiteEventResponse> listOfProject(UUID userId, UUID projectId) {
+		ProjectMembership membership = this.projectAccess.requireMember(userId, projectId);
+		return this.eventRepository.findAllOfProject(membership)
+			.stream()
+			.map(BaitSiteEventService::toResponse)
+			.toList();
+	}
+
 	@Transactional(readOnly = true)
 	BaitSiteEventResponse get(UUID userId, UUID projectId, UUID baitSiteId, UUID eventId) {
 		ProjectMembership membership = this.projectAccess.requireMember(userId, projectId);
@@ -149,8 +162,8 @@ class BaitSiteEventService {
 	}
 
 	private static BaitSiteEventResponse toResponse(BaitSiteEventRow row) {
-		return new BaitSiteEventResponse(row.id(), row.type(), row.occurredAt(), row.speciesId(), row.identifiedEventId(),
-				row.recordedAt(), row.voidedAt());
+		return new BaitSiteEventResponse(row.id(), row.baitSiteId(), row.type(), row.occurredAt(), row.speciesId(),
+				row.identifiedEventId(), row.recordedAt(), row.voidedAt());
 	}
 
 }

@@ -39,6 +39,14 @@ class BaitSiteEventController {
 		return new BaitSiteEventListResponse(this.eventService.list(user.id(), projectId, baitSiteId));
 	}
 
+	// One request for the events of the whole project, so the client's snapshot is 3 requests, not 1 + one per site
+	// (ADR 0008).
+	@GetMapping("/api/projects/{projectId}/events")
+	BaitSiteEventListResponse listOfProject(@AuthenticationPrincipal AuthenticatedUser user,
+			@PathVariable UUID projectId) {
+		return new BaitSiteEventListResponse(this.eventService.listOfProject(user.id(), projectId));
+	}
+
 	@GetMapping("/api/projects/{projectId}/bait-sites/{baitSiteId}/events/{eventId}")
 	BaitSiteEventResponse get(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable UUID projectId,
 			@PathVariable UUID baitSiteId, @PathVariable UUID eventId) {

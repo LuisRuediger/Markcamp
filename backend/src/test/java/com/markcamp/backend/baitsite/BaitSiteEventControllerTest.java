@@ -61,8 +61,8 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 	private static final List<String> PROBLEM_KEYS = List.of("type", "title", "status", "detail", "instance", "code",
 			"errors");
 
-	private static final String[] EVENT_KEYS = { "id", "type", "occurredAt", "speciesId", "identifiedEventId",
-			"recordedAt", "voidedAt" };
+	private static final String[] EVENT_KEYS = { "id", "baitSiteId", "type", "occurredAt", "speciesId",
+			"identifiedEventId", "recordedAt", "voidedAt" };
 
 	// In eventBody, removes the key instead of setting it.
 	private static final String ABSENT = "<absent>";
@@ -565,6 +565,8 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 				perform(get(eventsPath(missingProject, siteId)), stranger));
 		assertSame404(getEvent(stranger, projectId, siteId, eventId), getEvent(stranger, missingProject, siteId, eventId));
 		assertSame404(voidEvent(stranger, projectId, siteId, eventId), voidEvent(stranger, missingProject, siteId, eventId));
+		assertSame404(perform(get(projectEventsPath(projectId)), stranger),
+				perform(get(projectEventsPath(missingProject)), stranger));
 
 		assertThat(eventExists(newEventId)).isFalse();
 		assertThat(eventCount(siteId)).isEqualTo(eventsBefore);
@@ -871,6 +873,175 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 		assertProblem(postEvent(subject, projectId, siteId,
 				eventBody("type", quoted("COLLECTED"), "occurredAt", quoted(OCT_10.toString()))), 409,
 				"INVALID_EVENT_SEQUENCE");
+	}
+
+	// baitSiteId
+
+	@Test
+	void everyEventResponseCarriesTheSiteOfTheEvent() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		// Another site in the project, so a value taken from the wrong place would show.
+		recordOk(subject, projectId, newSite(subject, projectId), "ACTIVITY", OCT_5);
+		String eventId = UuidV7.generate().toString();
+
+		MockHttpServletResponse recorded = postEvent(subject, projectId, siteId,
+				eventBody("id", quoted(eventId), "type", quoted("INSPECTED")));
+		MockHttpServletResponse listed = perform(get(eventsPath(projectId, siteId)), subject);
+		MockHttpServletResponse got = getEvent(subject, projectId, siteId, eventId);
+		MockHttpServletResponse voided = voidEvent(subject, projectId, siteId, eventId);
+
+		assertThat(recorded.getStatus()).isEqualTo(201);
+		assertThat(JsonPath.<String>read(bodyOf(recorded), "$.baitSiteId")).isEqualTo(siteId);
+		assertThat(JsonPath.<List<String>>read(bodyOf(listed), "$.items[*].baitSiteId")).hasSize(2)
+			.containsOnly(siteId);
+		assertThat(JsonPath.<String>read(bodyOf(got), "$.baitSiteId")).isEqualTo(siteId);
+		assertThat(voided.getStatus()).isEqualTo(200);
+		assertThat(JsonPath.<String>read(bodyOf(voided), "$.baitSiteId")).isEqualTo(siteId);
+	}
+
+	// Project-wide list
+
+	@Test
+	void projectListIsInHistoryOrderAcrossSitesNotInsertionOrder() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteA = UuidV7.generate().toString();
+		String installedA = UuidV7.generate().toString();
+		createSite(subject, projectId, siteBody(siteA, installedA, OCT_1.plusHours(1)));
+		String siteB = UuidV7.generate().toString();
+		String installedB = UuidV7.generate().toString();
+		createSite(subject, projectId, siteBody(siteB, installedB, OCT_1));
+		String capturedA = recordOk(subject, projectId, siteA, "CAPTURED", OCT_10);
+		String activityB = recordOk(subject, projectId, siteB, "ACTIVITY", OCT_5);
+		String activityA = recordOk(subject, projectId, siteA, "ACTIVITY", OCT_5.minusHours(1));
+
+		MockHttpServletResponse response = perform(get(projectEventsPath(projectId)), subject);
+
+		assertThat(response.getStatus()).isEqualTo(200);
+		assertThat(response.getContentType()).isEqualTo(MediaType.APPLICATION_JSON_VALUE);
+		String body = bodyOf(response);
+		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys("items");
+		List<String> ids = JsonPath.read(body, "$.items[*].id");
+		assertThat(ids).containsExactly(installedB, installedA, activityA, activityB, capturedA);
+		assertThat(JsonPath.<List<String>>read(body, "$.items[*].baitSiteId")).containsExactly(siteB, siteA, siteA, siteB,
+				siteA);
+		assertThat(JsonPath.<List<Map<String, Object>>>read(body, "$.items"))
+			.allSatisfy((item) -> assertThat(item).containsOnlyKeys(EVENT_KEYS));
+		// Grouping by site in list order gives each site's own list, with no sorting.
+		for (String siteId : List.of(siteA, siteB)) {
+			assertThat(JsonPath.<List<String>>read(body, "$.items[?(@.baitSiteId == '" + siteId + "')].id"))
+				.isEqualTo(JsonPath.<List<String>>read(bodyOf(perform(get(eventsPath(projectId, siteId)), subject)),
+						"$.items[*].id"));
+		}
+	}
+
+	// The ids differ in the first bit, where UUID.compareTo (signed) and Postgres (unsigned) disagree. Inserted high first,
+	// so the insertion order cannot decide.
+	@Test
+	void sameOccurredAtOnDifferentSitesIsDecidedById() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteA = newSite(subject, projectId);
+		String siteB = newSite(subject, projectId);
+		String high = idWithHighBits("f0000000");
+		String low = idWithHighBits("00000000");
+		assertThat(postEvent(subject, projectId, siteA,
+				eventBody("id", quoted(high), "type", quoted("ACTIVITY"), "occurredAt", quoted(OCT_5.toString())))
+			.getStatus()).isEqualTo(201);
+		assertThat(postEvent(subject, projectId, siteB,
+				eventBody("id", quoted(low), "type", quoted("ACTIVITY"), "occurredAt", quoted(OCT_5.toString())))
+			.getStatus()).isEqualTo(201);
+
+		String body = bodyOf(perform(get(projectEventsPath(projectId)), subject));
+
+		// After the two INSTALLED of 1 Oct.
+		assertThat(JsonPath.<List<String>>read(body, "$.items[*].id")).hasSize(4).endsWith(low, high);
+		assertThat(JsonPath.<List<String>>read(body, "$.items[*].baitSiteId")).endsWith(siteB, siteA);
+	}
+
+	@Test
+	void projectListLeavesOutVoidedEvents() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteA = UuidV7.generate().toString();
+		String installedA = UuidV7.generate().toString();
+		createSite(subject, projectId, siteBody(siteA, installedA, OCT_1));
+		String captured = recordOk(subject, projectId, siteA, "CAPTURED", OCT_5);
+		String inspected = recordOk(subject, projectId, siteA, "INSPECTED", OCT_10);
+		assertThat(voidEvent(subject, projectId, siteA, inspected).getStatus()).isEqualTo(200);
+		// A site whose only event is voided.
+		String siteB = UuidV7.generate().toString();
+		String installedB = UuidV7.generate().toString();
+		createSite(subject, projectId, siteBody(siteB, installedB, OCT_1));
+		assertThat(voidEvent(subject, projectId, siteB, installedB).getStatus()).isEqualTo(200);
+
+		String body = bodyOf(perform(get(projectEventsPath(projectId)), subject));
+
+		assertThat(JsonPath.<List<String>>read(body, "$.items[*].id")).containsExactly(installedA, captured);
+		assertThat(JsonPath.<List<String>>read(body, "$.items[*].baitSiteId")).containsOnly(siteA);
+		assertThat(JsonPath.<List<Object>>read(body, "$.items[*].voidedAt")).hasSize(2).containsOnlyNulls();
+	}
+
+	// The caller is a member of both projects, so only the project filter in the query can keep them apart.
+	@Test
+	void projectListHasOnlyEventsOfThatProject() throws Exception {
+		String subject = newSubject();
+		String projectA = newProject(subject);
+		String projectB = newProject(subject);
+		String siteA = newSite(subject, projectA);
+		String siteB = newSite(subject, projectB);
+		String eventA = recordOk(subject, projectA, siteA, "ACTIVITY", OCT_5);
+		String eventB = recordOk(subject, projectB, siteB, "ACTIVITY", OCT_5);
+
+		String bodyA = bodyOf(perform(get(projectEventsPath(projectA)), subject));
+		String bodyB = bodyOf(perform(get(projectEventsPath(projectB)), subject));
+
+		assertThat(JsonPath.<List<String>>read(bodyA, "$.items[*].id")).hasSize(2).contains(eventA).doesNotContain(eventB);
+		assertThat(JsonPath.<List<String>>read(bodyA, "$.items[*].baitSiteId")).containsOnly(siteA);
+		assertThat(JsonPath.<List<String>>read(bodyB, "$.items[*].id")).hasSize(2).contains(eventB).doesNotContain(eventA);
+		assertThat(JsonPath.<List<String>>read(bodyB, "$.items[*].baitSiteId")).containsOnly(siteB);
+	}
+
+	@Test
+	void projectWithNoSitesHasAnEmptyList() throws Exception {
+		String subject = newSubject();
+
+		MockHttpServletResponse response = perform(get(projectEventsPath(newProject(subject))), subject);
+
+		assertThat(response.getStatus()).isEqualTo(200);
+		String body = bodyOf(response);
+		assertThat(JsonPath.<Map<String, Object>>read(body, "$")).containsOnlyKeys("items");
+		assertThat(JsonPath.<List<Object>>read(body, "$.items")).isEmpty();
+	}
+
+	@Test
+	void malformedProjectIdIsTheSameMalformedRequestAsOnThePerSiteList() throws Exception {
+		String subject = newSubject();
+
+		Map<String, Object> onProjectList = assertProblem(perform(get(projectEventsPath("not-a-uuid")), subject), 400,
+				"MALFORMED_REQUEST");
+		Map<String, Object> onSiteList = assertProblem(
+				perform(get(eventsPath("not-a-uuid", UuidV7.generate().toString())), subject), 400, "MALFORMED_REQUEST");
+
+		assertThat(withoutInstance(onProjectList)).isEqualTo(withoutInstance(onSiteList));
+	}
+
+	@Test
+	void projectListTakesOnlyAuthenticatedGet() throws Exception {
+		String subject = newSubject();
+		String projectId = newProject(subject);
+		String siteId = newSite(subject, projectId);
+		long eventsBefore = eventCount(siteId);
+
+		assertProblem(perform(post(projectEventsPath(projectId)).contentType(MediaType.APPLICATION_JSON)
+			.content(eventBody()), subject), 405, "METHOD_NOT_ALLOWED");
+		MockHttpServletResponse noToken = this.mockMvc.perform(get(projectEventsPath(projectId))).andReturn().getResponse();
+		assertThat(noToken.getStatus()).isEqualTo(401);
+		assertThat(noToken.getHeader("WWW-Authenticate")).startsWith("Bearer");
+
+		assertThat(eventCount(siteId)).isEqualTo(eventsBefore);
 	}
 
 	// Void
@@ -1327,6 +1498,10 @@ class BaitSiteEventControllerTest implements PostgresTestContainer {
 
 	private static String eventsPath(String projectId, String siteId) {
 		return sitesPath(projectId) + "/" + siteId + "/events";
+	}
+
+	private static String projectEventsPath(String projectId) {
+		return "/api/projects/" + projectId + "/events";
 	}
 
 	/**

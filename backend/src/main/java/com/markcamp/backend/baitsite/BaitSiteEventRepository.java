@@ -14,8 +14,9 @@ import com.markcamp.backend.project.ProjectMembership;
 
 // Repository, not JpaRepository: save() on an entity with an assigned id is a merge, i.e. an upsert (ADR 0002).
 // Writes, the history read and the target check take a LockedBaitSite, never a bare site id, so writing into a site of
-// another project, or validating without the lock, does not compile. The two read-only queries take a ProjectMembership
-// and filter by its project in the query.
+// another project, or validating without the lock, does not compile. The read-only queries take a ProjectMembership and
+// filter by its project in the query. baitSiteId in a row always comes from the stored event, never from the path: the
+// row says where the event is.
 interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 
 	/**
@@ -81,8 +82,8 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 	 * event as real. A GET of one event still returns it.
 	 */
 	@Query("""
-			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.speciesId,
-				e.identifiedEventId, e.recordedAt, e.voidedAt)
+			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.baitSiteId, e.eventType, e.occurredAt,
+				e.speciesId, e.identifiedEventId, e.recordedAt, e.voidedAt)
 			from BaitSiteEvent e
 			join BaitSite s on s.id = e.baitSiteId
 			where e.baitSiteId = :baitSiteId and s.projectId = :#{#membership.projectId()} and e.voidedAt is null
@@ -91,11 +92,32 @@ interface BaitSiteEventRepository extends Repository<BaitSiteEvent, UUID> {
 	List<BaitSiteEventRow> findAllOfSite(UUID baitSiteId, ProjectMembership membership);
 
 	/**
+	 * Every non-voided event of the project, for the client's project snapshot (ADR 0008). Without voided events for the
+	 * same reason as {@link #findAllOfSite}.
+	 * <p>
+	 * Ordered by (occurred_at, id) across the whole project, not grouped by site: the same key as the per-site list and the
+	 * replay, so the events of any one site, taken in the order they appear, are that site's history order. The client
+	 * groups by site without sorting again, so it cannot sort differently from the server (ADR 0007, rule 8).
+	 * <p>
+	 * Uses bait_sites_project_id_idx and bait_site_events_bait_site_id_occurred_at_idx from V2, and sorts the result in the
+	 * database. No index of its own: revisit when a measured snapshot is slow (ADR 0008).
+	 */
+	@Query("""
+			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.baitSiteId, e.eventType, e.occurredAt,
+				e.speciesId, e.identifiedEventId, e.recordedAt, e.voidedAt)
+			from BaitSiteEvent e
+			join BaitSite s on s.id = e.baitSiteId
+			where s.projectId = :#{#membership.projectId()} and e.voidedAt is null
+			order by e.occurredAt, e.id
+			""")
+	List<BaitSiteEventRow> findAllOfProject(ProjectMembership membership);
+
+	/**
 	 * In one query, so a missing event, an event of another site and a site of another project are the same empty result.
 	 */
 	@Query("""
-			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.eventType, e.occurredAt, e.speciesId,
-				e.identifiedEventId, e.recordedAt, e.voidedAt)
+			select new com.markcamp.backend.baitsite.BaitSiteEventRow(e.id, e.baitSiteId, e.eventType, e.occurredAt,
+				e.speciesId, e.identifiedEventId, e.recordedAt, e.voidedAt)
 			from BaitSiteEvent e
 			join BaitSite s on s.id = e.baitSiteId
 			where e.id = :id and e.baitSiteId = :baitSiteId and s.projectId = :#{#membership.projectId()}
