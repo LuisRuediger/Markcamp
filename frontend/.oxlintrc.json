@@ -48,6 +48,22 @@
       }
     },
     {
+      // The contract test checks core against shared/bait-site-state-machine-cases.json.
+      // It may import src/core, vitest and node: builtins, never adapters, ui or main.
+      // Bare specifiers other than "vitest" and "node:*" spelled out without lookahead.
+      "files": ["contract/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              "regex": "^([^.vn]|v([^i]|$)|vi([^t]|$)|vit([^e]|$)|vite([^s]|$)|vites([^t]|$)|vitest.|n([^o]|$)|no([^d]|$)|nod([^e]|$)|node([^:]|$))|(^|/)(adapters|ui|main)(/|\\.|$)",
+              "message": "the contract test may import only src/core, vitest and node: builtins (ADR 0007)."
+            }
+          ]
+        }]
+      }
+    },
+    {
       "files": ["src/adapters/**"],
       "rules": {
         "no-restricted-imports": ["error", {
