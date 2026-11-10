@@ -20,6 +20,25 @@
       }
     },
     {
+      // fake-indexeddb/auto replaces the global indexedDB with an in-memory one. In a file
+      // that reaches the bundle, the app would work and lose everything, the upload queue
+      // included, every time it is closed, with no error anywhere. Allowed only in
+      // src/adapters/**/*.test.ts. Here for src/main.tsx and any file no later override
+      // covers; a later override replaces this rule, so adapters and ui restate the ban
+      // (core already forbids every package).
+      "files": ["src/**"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              "group": ["fake-indexeddb", "fake-indexeddb/**"],
+              "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
+            }
+          ]
+        }]
+      }
+    },
+    {
       "files": ["src/core/**"],
       "rules": {
         "no-restricted-imports": ["error", {
@@ -73,6 +92,25 @@
             {
               "group": ["**/ui", "**/ui/**"],
               "message": "adapters may not import ui. Wire them in src/main.tsx (ADR 0007)."
+            },
+            {
+              "group": ["fake-indexeddb", "fake-indexeddb/**"],
+              "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
+            }
+          ]
+        }]
+      }
+    },
+    {
+      // Adapter tests may import fake-indexeddb (Node has no IndexedDB). This replaces the
+      // rule of the override above, so the ui ban is restated.
+      "files": ["src/adapters/**/*.test.ts"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              "group": ["**/ui", "**/ui/**"],
+              "message": "adapters may not import ui. Wire them in src/main.tsx (ADR 0007)."
             }
           ]
         }]
@@ -86,6 +124,16 @@
             {
               "group": ["**/adapters", "**/adapters/**"],
               "message": "ui may not import adapters. Wire them in src/main.tsx (ADR 0007)."
+            },
+            {
+              // The screen depends on core's interfaces, never on the database library
+              // (ADR 0007 rule 3, ADR 0008 rule 6): no useLiveQuery.
+              "group": ["dexie", "dexie/**"],
+              "message": "ui may not import dexie. Read through core's LocalStore port (ADR 0008)."
+            },
+            {
+              "group": ["fake-indexeddb", "fake-indexeddb/**"],
+              "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
             }
           ]
         }]

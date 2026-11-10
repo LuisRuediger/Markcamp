@@ -48,7 +48,19 @@ export interface IdGenerator {
   newId(): string
 }
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+/**
+ * What asking the browser to keep this site's storage gave (ADR 0008, decision 11).
+ * 'alreadyPersisted': it was already, nothing was asked. 'unsupported': the browser has no
+ * such API, or it failed.
+ */
+export type PersistOutcome = 'alreadyPersisted' | 'granted' | 'denied' | 'unsupported'
+
+export interface StoragePersistence {
+  /** Never rejects: the outcome never blocks anything (ADR 0008). The caller logs it. */
+  request(): Promise<PersistOutcome>
+}
+
+export type HttpMethod ='GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface TransportRequest {
   readonly method: HttpMethod
