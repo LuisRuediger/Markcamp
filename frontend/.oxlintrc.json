@@ -34,7 +34,9 @@
       }
     },
     {
-      "files": ["src/core/**/*.test.ts"],
+      // Tests and shared test suites (*.suite.ts: registered by a *.test.ts, e.g. the
+      // LocalStore contract run against the fake and against Dexie) may import vitest.
+      "files": ["src/core/**/*.test.ts", "src/core/**/*.suite.ts"],
       "rules": {
         "no-restricted-imports": ["error", {
           "patterns": [

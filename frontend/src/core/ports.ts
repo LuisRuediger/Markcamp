@@ -1,4 +1,5 @@
 // Ports (ADR 0007): interfaces declared by core and implemented in src/adapters/.
+// The local database port (LocalStore) and its types live in localStore.ts.
 
 export interface AuthUser {
   readonly email: string | null
