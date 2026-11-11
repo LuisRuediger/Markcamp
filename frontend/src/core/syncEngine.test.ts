@@ -1186,6 +1186,78 @@ describe('engine', () => {
     expect((await t.project()).baitSites).toEqual([])
   })
 
+  describe('25c. stop() during the last request before a download write: the write never happens', () => {
+    /** Records the download writes, so a write after stop() is caught even if it changes nothing visible. */
+    function recordingStore() {
+      const inner = createFakeLocalStore()
+      const writes: string[] = []
+      const store: LocalStore = {
+        ...inner,
+        async replaceProjects(projects) {
+          writes.push('replaceProjects')
+          return inner.replaceProjects(projects)
+        },
+        async replaceProjectSnapshot(projectId, snapshot) {
+          writes.push('replaceProjectSnapshot')
+          return inner.replaceProjectSnapshot(projectId, snapshot)
+        },
+      }
+      return { store, writes }
+    }
+
+    test('(i) GET /projects answers after stop(): replaceProjects is not called', async () => {
+      const { store, writes } = recordingStore()
+      const t = setup({ store })
+      seedServer(t.server, P, ['site-a'])
+      const gate = deferred()
+      t.answerOnce('GET /projects', async (answer) => {
+        await gate.promise
+        return answer()
+      })
+      const done = t.engine.requestSync('full')
+      await flush()
+      expect(t.routes()).toEqual(['GET /projects'])
+      const listener = vi.fn()
+      t.engine.subscribe(listener)
+
+      t.engine.stop()
+      gate.resolve()
+      await done
+      await flush()
+
+      expect(writes).toEqual([])
+      expect((await t.projects()).projects).toEqual([])
+      expect(listener).not.toHaveBeenCalled()
+      expect(t.routes()).toEqual(['GET /projects'])
+    })
+
+    test('(ii) GET of the project events answers after stop(): replaceProjectSnapshot is not called', async () => {
+      const { store, writes } = recordingStore()
+      const t = setup({ store })
+      seedServer(t.server, P, ['site-a'])
+      const gate = deferred()
+      t.answerOnce(`GET /projects/${P}/events`, async (answer) => {
+        await gate.promise
+        return answer()
+      })
+      const done = t.engine.requestSync('full')
+      await flush()
+      expect(t.routes().at(-1)).toBe(`GET /projects/${P}/events`)
+      const listener = vi.fn()
+      t.engine.subscribe(listener)
+
+      t.engine.stop()
+      gate.resolve()
+      await done
+      await flush()
+
+      expect(writes).toEqual(['replaceProjects'])
+      expect((await t.project()).baitSites).toEqual([])
+      expect(listener).not.toHaveBeenCalled()
+      expect(t.routes().at(-1)).toBe(`GET /projects/${P}/events`)
+    })
+  })
+
   test('26. the store throws inside confirm: error logged without its message, idle again, the next request works', async () => {
     const inner = createFakeLocalStore()
     let failures = 1

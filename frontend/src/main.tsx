@@ -1,14 +1,21 @@
 // Composition root (ADR 0007): the only file allowed to import both adapters and ui.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { createBrowserLifecycle } from './adapters/browserLifecycle'
+import { createBrowserTimers } from './adapters/browserTimers'
 import { createConsoleLogger } from './adapters/consoleLogger'
+import { createDexieLocalAccounts } from './adapters/dexieLocalAccounts'
+import { openDexieLocalStore } from './adapters/dexieLocalStore'
 import { createFetchTransport } from './adapters/fetchTransport'
 import { createFirebaseAuth } from './adapters/firebaseAuth'
+import { createStoragePersistence } from './adapters/storagePersistence'
 import { createUuidV7Generator } from './adapters/uuidV7Generator'
 import { createApiClient } from './core/apiClient'
 import { parseFirebaseConfig } from './core/config'
+import { createLocalSession } from './core/localSession'
 import { createProjectsStore } from './core/projectsStore'
 import { createSessionStore } from './core/sessionStore'
+import { createSyncEngine } from './core/syncEngine'
 import App from './ui/App'
 import ConfigErrorScreen from './ui/ConfigErrorScreen'
 import './ui/styles.css'
@@ -31,6 +38,20 @@ if (firebaseConfig.ok) {
   const logger = createConsoleLogger()
   const store = createSessionStore(auth, api, logger)
   const projects = createProjectsStore(store, api, createUuidV7Generator(), logger)
+  const timers = createBrowserTimers()
+
+  // Opens each session's local database and runs the sync engine over it (ADR 0008). Not
+  // passed to App yet: slice F2d-2 moves the project screen onto it. Until then the screen
+  // still reads GET /projects through `projects`, and the engine reads it too.
+  createLocalSession({
+    session: store,
+    accounts: createDexieLocalAccounts(),
+    openStore: (userId) => openDexieLocalStore(userId, logger),
+    createSync: (local) => createSyncEngine({ api, store: local, timers, logger }),
+    lifecycle: createBrowserLifecycle(),
+    persistence: createStoragePersistence(),
+    logger,
+  })
 
   root.render(
     <StrictMode>

@@ -11,7 +11,8 @@ import {
 } from './ports'
 import { createSessionStore } from './sessionStore'
 
-const USER: AuthUser = { email: 'person@example.com' }
+const USER: AuthUser = { uid: 'uid-person-1', email: 'person@example.com' }
+const OTHER: AuthUser = { uid: 'uid-other-2', email: 'other@example.com' }
 const ME_OK: TransportResponse = { status: 200, body: { id: 'user-1' } }
 
 // Capped for the reason given in apiClient.test.ts: a runaway retry must fail, not hang.
@@ -85,11 +86,11 @@ describe('GET /me', () => {
 
     expect(send).toHaveBeenCalledExactlyOnceWith({ method: 'GET', path: '/me', token: 'token' })
     expect(store.getSnapshot()).toEqual({ status: 'signedIn', email: USER.email, backend: 'ok' })
-    expect(store.getUserId()).toBe('user-1')
+    expect(store.getIdentity()?.userId).toBe('user-1')
 
     emit(null)
 
-    expect(store.getUserId()).toBeNull()
+    expect(store.getIdentity()?.userId ?? null).toBeNull()
   })
 
   test('a network failure stays signedIn with backend unavailable', async () => {
@@ -136,7 +137,7 @@ describe('GET /me', () => {
       email: USER.email,
       backend: 'unavailable',
     })
-    expect(store.getUserId()).toBeNull()
+    expect(store.getIdentity()?.userId ?? null).toBeNull()
     expect(logger.error).toHaveBeenCalledOnce()
     expect(logger.error.mock.calls[0]![0]).not.toContain(secret)
     expect(logger.error.mock.calls[0]![0]).not.toContain('7')
@@ -156,7 +157,7 @@ describe('GET /me', () => {
     await send.mock.results[0]!.value
 
     expect(store.getSnapshot()).toBe(afterSignOut)
-    expect(store.getUserId()).toBeNull()
+    expect(store.getIdentity()?.userId ?? null).toBeNull()
   })
 })
 
@@ -177,7 +178,7 @@ describe('session key', () => {
     emit(USER)
     const first = store.getSessionKey()
 
-    emit({ email: 'other@example.com' })
+    emit(OTHER)
 
     expect(store.getSessionKey()).not.toBeNull()
     expect(store.getSessionKey()).not.toBe(first)
@@ -201,7 +202,7 @@ describe('session key', () => {
     store.subscribe(() => seen.push(store.getSessionKey()))
 
     emit(USER)
-    emit({ email: 'other@example.com' })
+    emit(OTHER)
 
     expect(seen[0]).not.toBeNull()
     expect(seen[1]).not.toBeNull()
@@ -281,5 +282,93 @@ describe('subscribe', () => {
     unsubscribe()
     emit(USER)
     expect(listener).toHaveBeenCalledOnce()
+  })
+})
+
+describe('identity (for the local session)', () => {
+  test('18. null signed out; uid with no userId while checking; userId after /me ok; same object while unchanged', async () => {
+    const { store, emit, send } = setup()
+    expect(store.getIdentity()).toBeNull()
+    emit(null)
+    expect(store.getIdentity()).toBeNull()
+
+    emit(USER)
+    const checking = store.getIdentity()
+    expect(checking).toEqual({ uid: USER.uid, userId: null, backend: 'checking' })
+    expect(store.getIdentity()).toBe(checking)
+
+    await vi.waitFor(() => expect(store.getIdentity()?.backend).toBe('ok'))
+    const ok = store.getIdentity()
+    expect(ok).toEqual({ uid: USER.uid, userId: 'user-1', backend: 'ok' })
+    expect(store.getIdentity()).toBe(ok)
+    expect(send).toHaveBeenCalledOnce()
+  })
+
+  test('19. retryBackendCheck: unavailable -> checking -> ok with the id; a no-op when ok, checking or signed out', async () => {
+    let calls = 0
+    let release: (response: TransportResponse) => void = () => {}
+    const { store, send, emit } = await signedIn(() => {
+      calls += 1
+      if (calls === 1) return Promise.reject(new NetworkError())
+      return new Promise((resolve) => (release = resolve))
+    })
+    expect(store.getIdentity()).toEqual({ uid: USER.uid, userId: null, backend: 'unavailable' })
+
+    store.retryBackendCheck()
+    expect(store.getIdentity()?.backend).toBe('checking')
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+
+    // Still checking: no third request.
+    store.retryBackendCheck()
+    expect(send).toHaveBeenCalledTimes(2)
+
+    release(ME_OK)
+    await vi.waitFor(() => expect(store.getIdentity()?.backend).toBe('ok'))
+    expect(store.getIdentity()).toEqual({ uid: USER.uid, userId: 'user-1', backend: 'ok' })
+
+    store.retryBackendCheck()
+    expect(store.getIdentity()?.backend).toBe('ok')
+
+    emit(null)
+    store.retryBackendCheck()
+    expect(store.getIdentity()).toBeNull()
+    await Promise.resolve()
+    expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  test('20. a retry whose answer arrives after sign-out changes nothing', async () => {
+    let calls = 0
+    let release: (response: TransportResponse) => void = () => {}
+    const { store, send, emit } = await signedIn(() => {
+      calls += 1
+      if (calls === 1) return Promise.reject(new NetworkError())
+      return new Promise((resolve) => (release = resolve))
+    })
+    store.retryBackendCheck()
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2))
+
+    emit(null)
+    const afterSignOut = store.getSnapshot()
+    release(ME_OK)
+    await send.mock.results[1]!.value
+
+    expect(store.getSnapshot()).toBe(afterSignOut)
+    expect(store.getIdentity()).toBeNull()
+  })
+
+  test('21. the uid never appears in the snapshot screens read', async () => {
+    const { store, emit } = setup()
+    const seen: unknown[] = []
+    store.subscribe(() => seen.push(store.getSnapshot()))
+
+    emit(USER)
+    await vi.waitFor(() => expect(store.getIdentity()?.backend).toBe('ok'))
+    emit(OTHER)
+
+    expect(seen.length).toBeGreaterThan(0)
+    for (const snapshot of seen) {
+      expect(JSON.stringify(snapshot)).not.toContain(USER.uid)
+      expect(JSON.stringify(snapshot)).not.toContain(OTHER.uid)
+    }
   })
 })

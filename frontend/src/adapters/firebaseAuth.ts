@@ -44,7 +44,7 @@ export function createFirebaseAuth(config: FirebaseConfig): AuthPort {
   return {
     onUserChanged(listener) {
       return onAuthStateChanged(auth, (user) => {
-        listener(user === null ? null : { email: user.email })
+        listener(user === null ? null : { uid: user.uid, email: user.email })
       })
     },
     async signInWithEmail(email, password) {

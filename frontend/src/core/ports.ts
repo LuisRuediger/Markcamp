@@ -2,6 +2,11 @@
 // The local database port (LocalStore) and its types live in localStore.ts.
 
 export interface AuthUser {
+  /**
+   * The provider's id of the user. Only for the uid → internal id mapping on the device
+   * (ADR 0008, decision 9): never logged, never in a snapshot a screen reads.
+   */
+  readonly uid: string
   readonly email: string | null
 }
 
@@ -64,6 +69,14 @@ export interface StoragePersistence {
 export interface Timers {
   /** Calls back once after ms. Returns a cancel function. */
   after(ms: number, callback: () => void): () => void
+}
+
+/** Browser lifecycle events the core needs (ADR 0007: core has no DOM). */
+export interface AppLifecycle {
+  /** window 'online': the device reports a network connection again. Returns an unsubscribe function. */
+  onOnline(listener: () => void): () => void
+  /** document 'visibilitychange' to 'visible'. Returns an unsubscribe function. */
+  onForeground(listener: () => void): () => void
 }
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'

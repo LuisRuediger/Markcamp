@@ -28,14 +28,35 @@ export interface SessionKeySource {
   getSessionKey(): number | null
 }
 
+/**
+ * Who is signed in, for the local session only (ADR 0008, decision 9). The uid never reaches
+ * a screen (SessionSnapshot does not carry it), a log or an error message.
+ */
+export interface SessionIdentity {
+  readonly uid: string
+  /** From GET /me; null until it answered ok in this session. */
+  readonly userId: string | null
+  readonly backend: BackendState
+}
+
+export interface SessionIdentitySource extends SessionKeySource {
+  /** null when not signed in. The same object while nothing changed. */
+  getIdentity(): SessionIdentity | null
+  /** Runs GET /me again when signed in with backend 'unavailable'; a no-op otherwise. */
+  retryBackendCheck(): void
+}
+
 export function createSessionStore(
   auth: AuthPort,
   api: ApiClient,
   logger: Logger,
-): SessionStore & SessionKeySource & { getUserId(): string | null } {
+): SessionStore & SessionIdentitySource {
   let snapshot: SessionSnapshot = { status: 'loading' }
-  // Memory only. Which key marks the owner of outbox entries is decided in slice F2.
+  // Memory only. The uid is handed to the local session for the device's mapping database
+  // and nowhere else; userId names the local database (ADR 0008, decision 9).
+  let uid: string | null = null
   let userId: string | null = null
+  let identity: SessionIdentity | null = null
   // Bumped on every session change, so a late /me answer cannot touch a newer session.
   let generation = 0
   const listeners = new Set<() => void>()
@@ -76,6 +97,7 @@ export function createSessionStore(
 
   function handleUserChanged(user: AuthUser | null): void {
     generation += 1
+    uid = user?.uid ?? null
     userId = null
     if (user === null) {
       // Already signedOut keeps the same snapshot, and so the sessionExpired notice.
@@ -89,6 +111,7 @@ export function createSessionStore(
   async function handleUnauthorized(): Promise<void> {
     if (snapshot.status !== 'signedIn') return
     generation += 1
+    uid = null
     userId = null
     setSnapshot({ status: 'signedOut', notice: 'sessionExpired' })
     try {
@@ -123,9 +146,23 @@ export function createSessionStore(
       return () => listeners.delete(listener)
     },
     getSnapshot: () => snapshot,
-    getUserId: () => userId,
     // generation is bumped before every session change is published, so listeners already see the new key.
     getSessionKey: () => (snapshot.status === 'signedIn' ? generation : null),
+    getIdentity() {
+      if (snapshot.status !== 'signedIn' || uid === null) return null
+      const { backend } = snapshot
+      // A new object only when a field changed, so callers can compare with ===.
+      if (identity === null || identity.uid !== uid || identity.userId !== userId || identity.backend !== backend) {
+        identity = { uid, userId, backend }
+      }
+      return identity
+    },
+    retryBackendCheck() {
+      if (snapshot.status !== 'signedIn' || snapshot.backend !== 'unavailable') return
+      setBackend('checking')
+      // The current generation: an answer that arrives after a sign-out is ignored by checkBackend.
+      void checkBackend(generation)
+    },
     signInWithEmail: (email, password) => attemptSignIn(() => auth.signInWithEmail(email, password)),
     signInWithGoogle: () => attemptSignIn(() => auth.signInWithGoogle()),
     async signOut() {
