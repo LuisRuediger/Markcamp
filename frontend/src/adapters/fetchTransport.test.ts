@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { NetworkError } from '../core/ports'
 import { createFetchTransport } from './fetchTransport'
 
@@ -111,5 +111,74 @@ describe('response', () => {
     expect(error).toBeInstanceOf(NetworkError)
     expect((error as NetworkError).message).not.toContain(token)
     expect(String((error as NetworkError).stack)).not.toContain(token)
+  })
+})
+
+describe('timeout', () => {
+  const TIMEOUT_MS = 20_000
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function stalled(answer: () => Promise<Response>) {
+    const signals: AbortSignal[] = []
+    const fetchFn = vi.fn<typeof fetch>(async (_, init) => {
+      const signal = init?.signal
+      if (!signal) throw new Error('no signal')
+      signals.push(signal)
+      return answer()
+    })
+    return { signals, transport: createFetchTransport('/api', fetchFn, TIMEOUT_MS) }
+  }
+
+  test('a fetch that never settles becomes a NetworkError after the timeout, and is aborted', async () => {
+    const { signals, transport } = stalled(() => new Promise<Response>(() => {}))
+    const settled = transport.send({ method: 'GET', path: '/me' }).catch((error: unknown) => error)
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS - 1)
+    expect(signals[0]?.aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(await settled).toBeInstanceOf(NetworkError)
+    expect(signals[0]?.aborted).toBe(true)
+  })
+
+  test('a body that never finishes reading becomes a NetworkError after the timeout, and is aborted', async () => {
+    const { signals, transport } = stalled(
+      async () =>
+        new Response(new ReadableStream({ start() {} }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    )
+    const settled = transport.send({ method: 'GET', path: '/projects' }).catch((error: unknown) => error)
+
+    await vi.advanceTimersByTimeAsync(TIMEOUT_MS)
+
+    expect(await settled).toBeInstanceOf(NetworkError)
+    expect(signals[0]?.aborted).toBe(true)
+  })
+
+  test('a fast answer clears the timer', async () => {
+    const { signals, transport } = stalled(async () => jsonResponse(200, { id: 'x' }))
+
+    await expect(transport.send({ method: 'GET', path: '/me' })).resolves.toEqual({ status: 200, body: { id: 'x' } })
+
+    expect(vi.getTimerCount()).toBe(0)
+    expect(signals[0]?.aborted).toBe(false)
+  })
+
+  test('a fast network failure clears the timer too', async () => {
+    const { transport } = stalled(async () => {
+      throw new TypeError('Failed to fetch')
+    })
+
+    await expect(transport.send({ method: 'GET', path: '/me' })).rejects.toBeInstanceOf(NetworkError)
+
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

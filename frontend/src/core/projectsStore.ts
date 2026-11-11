@@ -56,7 +56,7 @@ function failed(failure: CreateProjectFailure, forgetId = false): CreateOutcome 
 }
 
 /** Copies only the known fields: the snapshot never carries anything else from a body. */
-function parseProject(value: unknown): Project | null {
+export function parseProject(value: unknown): Project | null {
   if (typeof value !== 'object' || value === null) return null
   const { id, name, role, createdAt } = value as Record<string, unknown>
   if (typeof id !== 'string' || typeof name !== 'string' || typeof createdAt !== 'string') return null
@@ -64,7 +64,7 @@ function parseProject(value: unknown): Project | null {
   return { id, name, role, createdAt }
 }
 
-function parseProjectList(body: unknown): readonly Project[] | null {
+export function parseProjectList(body: unknown): readonly Project[] | null {
   if (typeof body !== 'object' || body === null || !('items' in body)) return null
   const items: unknown = body.items
   if (!Array.isArray(items)) return null

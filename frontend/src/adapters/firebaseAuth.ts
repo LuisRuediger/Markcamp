@@ -13,6 +13,10 @@ import {
 import type { FirebaseConfig } from '../core/config'
 import { SignInError, type AuthPort } from '../core/ports'
 import { signInErrorKindFromCode } from './firebaseErrors'
+import { withTimeout } from './withTimeout'
+
+/** The same limit as a request (ADR 0008, decision 5). */
+const TOKEN_TIMEOUT_MS = 20_000
 
 function toSignInError(error: unknown): SignInError {
   const code =
@@ -65,7 +69,9 @@ export function createFirebaseAuth(config: FirebaseConfig): AuthPort {
     async getIdToken(forceRefresh) {
       const user = auth.currentUser
       if (user === null) throw new Error('No signed-in user.')
-      return user.getIdToken(forceRefresh)
+      // On weak signal a refresh may never settle, and the single-flight sync engine would
+      // wait on it until the app restarts. A rejection becomes 'unavailable' in the API client.
+      return withTimeout(user.getIdToken(forceRefresh), TOKEN_TIMEOUT_MS)
     },
   }
 }

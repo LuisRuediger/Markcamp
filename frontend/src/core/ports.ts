@@ -60,7 +60,13 @@ export interface StoragePersistence {
   request(): Promise<PersistOutcome>
 }
 
-export type HttpMethod ='GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+/** Core has no setTimeout (no DOM library, ADR 0007): the sync engine's safety timer goes through here. */
+export interface Timers {
+  /** Calls back once after ms. Returns a cancel function. */
+  after(ms: number, callback: () => void): () => void
+}
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface TransportRequest {
   readonly method: HttpMethod
