@@ -6,6 +6,7 @@ import {
   countPending,
   createPendingCountView,
   createProjectView,
+  createProjectViewCache,
   createProjectsView,
   mergeProject,
   mergeProjects,
@@ -447,6 +448,32 @@ describe('views cache the merge', () => {
       value: [{ id: P, name: 'Farm', role: 'OWNER', createdAt: null, pending: true, rejection: null }],
     })
     expect(view.getSnapshot()).toBe(second)
+    unsubscribe()
+  })
+})
+
+describe('createProjectViewCache', () => {
+  test('the same id gives the same object; different ids give different objects', () => {
+    const cache = createProjectViewCache(createFakeLocalStore())
+
+    const first = cache('p-1')
+    expect(cache('p-1')).toBe(first)
+    expect(cache('p-2')).not.toBe(first)
+    expect(cache('p-2')).toBe(cache('p-2'))
+  })
+
+  test('the view reflects the store: a site enqueued shows up', async () => {
+    const store = createFakeLocalStore()
+    const view = createProjectViewCache(store)(P)
+    const unsubscribe = view.subscribe(() => {})
+    await vi.waitFor(() => expect(view.getSnapshot().status).toBe('ready'))
+
+    await store.enqueue(createSite('s-1', 'e-1', 'Isca 1'))
+
+    await vi.waitFor(() => {
+      const snapshot = view.getSnapshot()
+      expect(snapshot.status === 'ready' && snapshot.value.baitSites.map((candidate) => candidate.name)).toEqual(['Isca 1'])
+    })
     unsubscribe()
   })
 })

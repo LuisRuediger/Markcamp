@@ -1,3 +1,4 @@
+import type { BaitSiteEventType, BaitSiteStatus } from '../../core/baitSiteStateMachine'
 import type { SignInFailureKind } from '../../core/sessionStore'
 
 export const ptBR = {
@@ -57,5 +58,52 @@ export const ptBR = {
     cancel: 'Cancelar',
     saveFailed: 'Não foi possível salvar no aparelho. Tente de novo',
     changeFailed: 'Não foi possível alterar o registro no aparelho. Tente de novo',
+  },
+  nav: {
+    back: 'Voltar',
+  },
+  sites: {
+    loading: 'Carregando pontos…',
+    empty: 'Nenhum ponto ainda',
+    projectNotFound: 'Projeto não encontrado',
+    newSite: 'Novo ponto',
+    projectRejected: 'Este projeto foi recusado pelo servidor. Resolva na lista de projetos.',
+    status: {
+      EMPTY: 'Vazia',
+      ARMED: 'Armada',
+      ACTIVE: 'Com atividade',
+      CAPTURED: 'Capturada',
+      LOST: 'Perdida',
+    } satisfies Record<BaitSiteStatus, string>,
+    invalidHistory: 'Histórico inválido',
+    since: (dayMonth: string) => `desde ${dayMonth}`,
+    pendingMark: 'aguardando envio',
+    eventTypes: {
+      INSTALLED: 'Instalação',
+      ACTIVITY: 'Atividade',
+      CAPTURED: 'Captura',
+      LOST: 'Perda',
+      COLLECTED: 'Coleta',
+      REMOVED: 'Retirada',
+      INSPECTED: 'Inspeção',
+      IDENTIFIED: 'Identificação',
+    } satisfies Record<BaitSiteEventType, string>,
+    eventAt: (type: string, dayMonthTime: string) => `${type} de ${dayMonthTime}`,
+    rejectedSite: 'O servidor recusou este ponto',
+    rejectedRecord: (event: string) => `O servidor recusou o registro: ${event}`,
+    rejectedVoid: (event: string) => `O servidor recusou a anulação: ${event}`,
+    rejectedUnknown: 'O servidor recusou um registro deste ponto',
+    searching: 'Procurando sinal…',
+    accuracy: (metres: number) => `Precisão: ${metres} m`,
+    noSignal: 'Sem sinal de GPS por enquanto. Continue no lugar.',
+    locationDenied:
+      'Localização negada. No iPhone: Ajustes → Privacidade e Segurança → Serviços de Localização → Sites do Safari. Depois volte e abra esta tela de novo.',
+    locationUnsupported: 'Este aparelho não oferece localização.',
+    nameLabel: 'Nome do ponto',
+    changeDate: 'alterar data e hora',
+    dateLabel: 'Data e hora',
+    useNow: 'usar agora',
+    save: 'Salvar',
+    saveFailed: 'Não foi possível salvar no aparelho. Tente de novo',
   },
 } as const

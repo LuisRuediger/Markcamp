@@ -1,5 +1,11 @@
 import type { LocalAccounts } from './localAccounts'
-import { createPendingCountView, createProjectsView, type ProjectListEntry } from './localMerge'
+import {
+  createPendingCountView,
+  createProjectViewCache,
+  createProjectsView,
+  type ProjectListEntry,
+  type ProjectView,
+} from './localMerge'
 import type { LocalStore, Observable, QueuePayload } from './localStore'
 import type { AppLifecycle, Logger, StoragePersistence } from './ports'
 import type { SessionIdentitySource } from './sessionStore'
@@ -24,6 +30,8 @@ export type LocalSessionSnapshot =
       readonly projects: Observable<readonly ProjectListEntry[]>
       /** Queue items waiting to be sent, of every kind and project (the sync indicator). */
       readonly pendingCount: Observable<number>
+      /** One project's merged view; the same id gives the same object for the whole session. */
+      readonly project: (projectId: string) => Observable<ProjectView>
     }
 
 export type SubmitOutcome = 'queued' | 'notReady'
@@ -142,6 +150,7 @@ export function createLocalSession(deps: LocalSessionDeps): LocalSession {
           sync,
           projects: createProjectsView(store),
           pendingCount: createPendingCountView(store),
+          project: createProjectViewCache(store),
         }
         run.runtime = { store, snapshot: ready }
         setSnapshot(ready)

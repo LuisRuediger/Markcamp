@@ -27,6 +27,11 @@ export function suggestBaitSiteName(existingNames: readonly string[]): string {
   return `Isca ${highest + 1}`
 }
 
+/** The site, one of its events or a void of one is still in the queue. */
+export function hasPendingChanges(site: BaitSiteView): boolean {
+  return site.pending || site.events.some((event) => event.pending) || site.pendingVoidEventIds.length > 0
+}
+
 /**
  * The latest CAPTURED in site.events (history order), or null. What an IDENTIFIED points to
  * (decision J4 of slice F3). Picked with compareHistoryOrder, not by array position.

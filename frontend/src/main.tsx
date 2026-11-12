@@ -1,6 +1,7 @@
 // Composition root (ADR 0007): the only file allowed to import both adapters and ui.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { createBrowserGeolocation } from './adapters/browserGeolocation'
 import { createBrowserLifecycle } from './adapters/browserLifecycle'
 import { createBrowserTimers } from './adapters/browserTimers'
 import { createConsoleLogger } from './adapters/consoleLogger'
@@ -54,10 +55,12 @@ if (firebaseConfig.ok) {
   const commands = createLocalCommands(local, createUuidV7Generator(), () => new Date())
   // Once per run: installing opens another window (Android) or another storage (iOS).
   const installed = isInstalledApp()
+  // Nothing is asked of the browser here: the GPS starts only when the New site screen opens.
+  const geolocation = createBrowserGeolocation(navigator.geolocation)
 
   root.render(
     <StrictMode>
-      <App store={store} local={local} commands={commands} installed={installed} />
+      <App store={store} local={local} commands={commands} installed={installed} geolocation={geolocation} />
     </StrictMode>,
   )
 } else {

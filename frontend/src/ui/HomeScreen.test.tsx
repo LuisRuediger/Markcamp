@@ -49,6 +49,7 @@ async function setup(prepare: (store: LocalStore) => Promise<void> = async () =>
       projects={projects}
       pendingCount={pendingCount}
       sync={sync}
+      onOpenProject={() => {}}
     />,
   )
   return {

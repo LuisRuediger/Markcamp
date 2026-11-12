@@ -79,7 +79,26 @@ export interface AppLifecycle {
   onForeground(listener: () => void): () => void
 }
 
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export interface GeoReading {
+  readonly latitude: number
+  readonly longitude: number
+  /** Radius in metres, as reported by the device. */
+  readonly accuracyM: number
+}
+
+/** denied: the user refused (no more callbacks). unavailable: no fix right now (still watching). unsupported: no geolocation on this device (no more callbacks). */
+export type GeoFailure = 'denied' | 'unavailable' | 'unsupported'
+
+/** The device's position (decision J3 of slice F3). Named so it never shadows the DOM's Geolocation in ui files. */
+export interface GeolocationPort {
+  /**
+   * Starts watching. Callbacks are never called before watch() returns, and never after
+   * the returned stop function is called (it is idempotent).
+   */
+  watch(onReading: (reading: GeoReading) => void, onFailure: (failure: GeoFailure) => void): () => void
+}
+
+export type HttpMethod ='GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface TransportRequest {
   readonly method: HttpMethod

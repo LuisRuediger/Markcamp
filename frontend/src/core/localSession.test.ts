@@ -615,6 +615,24 @@ describe('writes', () => {
     unsubscribe()
   })
 
+  test("15f. the ready snapshot's project(id) gives the same object twice; a new session gives a new function and new objects", async () => {
+    const t = await readyAsA()
+    const first = t.local.getSnapshot()
+    if (first.status !== 'ready') throw new Error('not ready')
+    const view = first.project('project-1')
+    expect(first.project('project-1')).toBe(view)
+
+    t.session.signOut()
+    t.session.signIn(UID_A)
+    await flush()
+
+    const second = t.local.getSnapshot()
+    if (second.status !== 'ready') throw new Error('not ready')
+    expect(second.project).not.toBe(first.project)
+    expect(second.project('project-1')).not.toBe(view)
+    expect(second.project('project-1')).toBe(second.project('project-1'))
+  })
+
   test('15b. submit when not ready: notReady, nothing enqueued', async () => {
     const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
     await expect(t.local.submit(PROJECT)).resolves.toBe('notReady')

@@ -387,6 +387,25 @@ export function createProjectView(store: LocalStore, projectId: string): Observa
 }
 
 /**
+ * One ProjectView observable per project id, created on first use and then reused: the same
+ * id always returns the same object (useSyncExternalStore needs a stable subscribe).
+ *
+ * Never cleared: a session sees a handful of projects, and the cache belongs to the session
+ * (localSession.ts makes a new one per session).
+ */
+export function createProjectViewCache(store: LocalStore): (projectId: string) => Observable<ProjectView> {
+  const views = new Map<string, Observable<ProjectView>>()
+  return (projectId) => {
+    let view = views.get(projectId)
+    if (view === undefined) {
+      view = createProjectView(store, projectId)
+      views.set(projectId, view)
+    }
+    return view
+  }
+}
+
+/**
  * Queue items still waiting to be sent, of every kind and project: those with no rejection.
  * Rejected items show on their own row (decision E5 of slice F2c); items blocked behind a
  * rejected one have no rejection of their own and are still waiting, so they count.

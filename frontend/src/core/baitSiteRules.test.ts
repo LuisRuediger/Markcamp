@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'vitest'
 import type { BaitSiteEventType } from './baitSiteStateMachine'
-import { allowedEventTypes, checkNewEvent, checkVoid, identificationTarget, suggestBaitSiteName } from './baitSiteRules'
+import {
+  allowedEventTypes,
+  checkNewEvent,
+  checkVoid,
+  hasPendingChanges,
+  identificationTarget,
+  suggestBaitSiteName,
+} from './baitSiteRules'
 import { toHistoryInstant, type HistoryInstant } from './historyOrder'
 import { mergeProject, type BaitSiteView } from './localMerge'
 import type { LocalEvent, QueueItem } from './localStore'
@@ -59,6 +66,68 @@ describe('suggestBaitSiteName', () => {
     ['leading zeros read as the number', ['Isca 007'], 'Isca 8'],
   ])('%s', (_name, names, expected) => {
     expect(suggestBaitSiteName(names)).toBe(expected)
+  })
+})
+
+describe('hasPendingChanges', () => {
+  const installed = event('e-1', 'INSTALLED', day(1))
+  const activity = event('e-2', 'ACTIVITY', day(2))
+  const queued = (seq: number, payload: QueueItem['payload']): QueueItem => ({ seq, payload, rejection: null })
+
+  test.each<[string, BaitSiteView, boolean]>([
+    [
+      'the site itself is pending',
+      siteWith(
+        [],
+        [
+          queued(1, {
+            kind: 'createBaitSite',
+            projectId: P,
+            baitSiteId: 's-1',
+            name: 'Ipe tree',
+            latitude: -27.1,
+            longitude: -49.1,
+            locationAccuracyM: 5,
+            installation: { id: 'e-1', occurredAt: day(1) },
+          }),
+        ],
+      ),
+      true,
+    ],
+    [
+      'a confirmed site with a pending event',
+      siteWith(
+        [installed],
+        [
+          queued(1, {
+            kind: 'recordEvent',
+            projectId: P,
+            baitSiteId: 's-1',
+            eventId: 'e-2',
+            type: 'ACTIVITY',
+            occurredAt: day(2),
+            speciesId: null,
+            identifiedEventId: null,
+          }),
+        ],
+      ),
+      true,
+    ],
+    [
+      'a confirmed site with a pending void',
+      siteWith([installed, activity], [queued(1, { kind: 'voidEvent', projectId: P, baitSiteId: 's-1', eventId: 'e-2' })]),
+      true,
+    ],
+    ['everything confirmed', siteWith([installed, activity]), false],
+  ])('%s', (_name, site, expected) => {
+    expect(hasPendingChanges(site)).toBe(expected)
+  })
+
+  test('the cases above are what they claim', () => {
+    // Guards the table: the void case hides its event, so only pendingVoidEventIds shows it.
+    const voided = siteWith([installed, activity], [queued(1, { kind: 'voidEvent', projectId: P, baitSiteId: 's-1', eventId: 'e-2' })])
+    expect(voided.pending).toBe(false)
+    expect(voided.events.some((candidate) => candidate.pending)).toBe(false)
   })
 })
 

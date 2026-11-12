@@ -7,10 +7,12 @@ import type { SessionStore } from '../core/sessionStore'
 import type { SyncEngine } from '../core/syncEngine'
 import { syncIndicator, type SyncIndicator } from '../core/syncIndicator'
 import { ptBR } from './i18n/pt-BR'
+import RejectionActions from './RejectionActions'
 
-// The home screen while the local session is ready (ADR 0008). It reads only the merge view
-// of confirmed copy + queue and the engine's status; its only writes are
-// commands.createProject, local.retry and local.discard.
+// The home screen (the Projects screen) while the local session is ready (ADR 0008). It reads
+// only the merge view of confirmed copy + queue and the engine's status; its only writes are
+// commands.createProject, local.retry and local.discard. The sync bar and "Sair" live only
+// here (decision K2 of slice F3-2).
 
 interface HomeScreenProps {
   store: Pick<SessionStore, 'signOut'>
@@ -22,6 +24,8 @@ interface HomeScreenProps {
   /** Queue items waiting to be sent, of every kind (not only projects). */
   pendingCount: Observable<number>
   sync: SyncEngine
+  /** Tapping a project's name opens its Project screen. */
+  onOpenProject: (projectId: string) => void
 }
 
 function indicatorText(indicator: SyncIndicator): string {
@@ -58,65 +62,31 @@ function rejectionText(code: string | null): string {
   return code === 'VALIDATION_FAILED' ? ptBR.projects.rejectedName : ptBR.projects.rejectedOther
 }
 
-function ProjectRow({ project, local }: { project: ProjectListEntry; local: HomeScreenProps['local'] }) {
-  const [confirming, setConfirming] = useState(false)
-  const [failed, setFailed] = useState(false)
+function ProjectRow({
+  project,
+  local,
+  onOpen,
+}: {
+  project: ProjectListEntry
+  local: HomeScreenProps['local']
+  onOpen: () => void
+}) {
   const { rejection } = project
-
-  async function change(action: () => Promise<void>) {
-    setFailed(false)
-    try {
-      await action()
-    } catch {
-      setFailed(true)
-    }
-  }
 
   return (
     <li>
-      <span>{project.name}</span>
+      <button type="button" onClick={onOpen}>
+        {project.name}
+      </button>
       {project.pending && rejection === null && <span> · {ptBR.projects.pendingMark}</span>}
       {rejection !== null && (
-        <>
-          <p>{rejectionText(rejection.code)}</p>
-          <button
-            type="button"
-            onClick={() => {
-              setConfirming(false)
-              void change(() => local.retry(rejection.seq))
-            }}
-          >
-            {ptBR.retry}
-          </button>
-          {/* Discarding deletes the record for good: a second tap on the row confirms it. */}
-          {confirming ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  setConfirming(false)
-                  void change(() => local.discard(rejection.seq))
-                }}
-              >
-                {ptBR.projects.confirmDiscard}
-              </button>
-              <button type="button" onClick={() => setConfirming(false)}>
-                {ptBR.projects.cancel}
-              </button>
-            </>
-          ) : (
-            <button type="button" onClick={() => setConfirming(true)}>
-              {ptBR.projects.discard}
-            </button>
-          )}
-        </>
+        <RejectionActions key={rejection.seq} text={rejectionText(rejection.code)} seq={rejection.seq} local={local} />
       )}
-      {failed && <p role="alert">{ptBR.projects.changeFailed}</p>}
     </li>
   )
 }
 
-function HomeScreen({ store, local, commands, email, projects, pendingCount, sync }: HomeScreenProps) {
+function HomeScreen({ store, local, commands, email, projects, pendingCount, sync, onOpenProject }: HomeScreenProps) {
   const list = useSyncExternalStore(projects.subscribe, projects.getSnapshot)
   const pending = useSyncExternalStore(pendingCount.subscribe, pendingCount.getSnapshot)
   const [name, setName] = useState('')
@@ -153,7 +123,7 @@ function HomeScreen({ store, local, commands, email, projects, pendingCount, syn
         return (
           <ul>
             {list.value.map((project) => (
-              <ProjectRow key={project.id} project={project} local={local} />
+              <ProjectRow key={project.id} project={project} local={local} onOpen={() => onOpenProject(project.id)} />
             ))}
           </ul>
         )
