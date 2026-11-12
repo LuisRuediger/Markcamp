@@ -2,7 +2,15 @@ import { describe, expect, test, vi } from 'vitest'
 import type { BaitSiteEventType } from './baitSiteStateMachine'
 import { createFakeLocalStore } from './fakeLocalStore'
 import { toHistoryInstant, type HistoryInstant } from './historyOrder'
-import { createProjectView, createProjectsView, mergeProject, mergeProjects, type BaitSiteView } from './localMerge'
+import {
+  countPending,
+  createPendingCountView,
+  createProjectView,
+  createProjectsView,
+  mergeProject,
+  mergeProjects,
+  type BaitSiteView,
+} from './localMerge'
 import type {
   Loadable,
   LocalBaitSite,
@@ -91,7 +99,7 @@ describe('mergeProject', () => {
   test('a bait site only in the queue appears pending, with its INSTALLED, and replays as ARMED', () => {
     const view = onlySite(raw({ queue: [item(createSite('s-1', 'e-1'))] }))
 
-    expect(view).toMatchObject({ id: 's-1', name: 'Pending site', createdAt: null, pending: true, rejected: false })
+    expect(view).toMatchObject({ id: 's-1', name: 'Pending site', createdAt: null, pending: true, rejection: null })
     expect(view.events).toEqual([
       {
         id: 'e-1',
@@ -196,20 +204,105 @@ describe('mergeProject', () => {
     expect(merged.baitSites[0]?.events.map((candidate) => candidate.id)).toEqual(['e-1'])
   })
 
-  test('a rejected item marks its bait site rejected', () => {
-    const rejection = { status: 409, code: 'INVALID_EVENT_SEQUENCE' }
+  test('a rejected recordEvent gives the rejection of its own site only: seq, status, code, kind, the event', () => {
+    const rejected = item(recordEvent('s-2', 'e-3', 'ACTIVITY', day(2)), { status: 409, code: 'INVALID_EVENT_SEQUENCE' })
     const merged = mergeProject(
       raw({
         baitSites: [site('s-1'), site('s-2')],
         events: [event('e-1', 's-1', 'INSTALLED', day(1)), event('e-2', 's-2', 'INSTALLED', day(1))],
-        queue: [item(recordEvent('s-2', 'e-3', 'ACTIVITY', day(2)), rejection)],
+        queue: [rejected],
       }),
     )
 
-    expect(merged.baitSites.map((candidate) => [candidate.id, candidate.rejected])).toEqual([
-      ['s-1', false],
-      ['s-2', true],
+    expect(merged.baitSites.map((candidate) => [candidate.id, candidate.rejection])).toEqual([
+      ['s-1', null],
+      [
+        's-2',
+        {
+          seq: rejected.seq,
+          status: 409,
+          code: 'INVALID_EVENT_SEQUENCE',
+          kind: 'recordEvent',
+          event: { id: 'e-3', type: 'ACTIVITY', occurredAt: day(2) },
+        },
+      ],
     ])
+  })
+
+  test('a rejected createBaitSite gives its INSTALLED', () => {
+    const rejected = item(createSite('s-1', 'e-1'), { status: 400, code: 'VALIDATION_FAILED' })
+
+    expect(onlySite(raw({ queue: [rejected] })).rejection).toEqual({
+      seq: rejected.seq,
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      kind: 'createBaitSite',
+      event: { id: 'e-1', type: 'INSTALLED', occurredAt: day(1) },
+    })
+  })
+
+  test('a rejected voidEvent of a confirmed event gives that event, although the merge hides it', () => {
+    const rejected = item(voidEvent('s-1', 'e-2'), { status: 409, code: 'INVALID_EVENT_SEQUENCE' })
+    const view = onlySite(
+      raw({
+        baitSites: [site('s-1')],
+        events: [event('e-1', 's-1', 'INSTALLED', day(1)), event('e-2', 's-1', 'CAPTURED', day(2))],
+        queue: [rejected],
+      }),
+    )
+
+    expect(eventIds(view)).toEqual(['e-1'])
+    expect(view.rejection).toEqual({
+      seq: rejected.seq,
+      status: 409,
+      code: 'INVALID_EVENT_SEQUENCE',
+      kind: 'voidEvent',
+      event: { id: 'e-2', type: 'CAPTURED', occurredAt: day(2) },
+    })
+  })
+
+  test('a rejected voidEvent of a pending event gives that event; of an event found nowhere, null', () => {
+    const pendingVoid = item(voidEvent('s-1', 'e-2'), { status: 500, code: null })
+    const withPending = onlySite(
+      raw({
+        baitSites: [site('s-1')],
+        events: [event('e-1', 's-1', 'INSTALLED', day(1))],
+        queue: [item(recordEvent('s-1', 'e-2', 'ACTIVITY', day(2))), pendingVoid],
+      }),
+    )
+    expect(withPending.rejection?.event).toEqual({ id: 'e-2', type: 'ACTIVITY', occurredAt: day(2) })
+
+    const nowhere = onlySite(
+      raw({
+        baitSites: [site('s-1')],
+        events: [event('e-1', 's-1', 'INSTALLED', day(1))],
+        queue: [item(voidEvent('s-1', 'e-9'), { status: 500, code: null })],
+      }),
+    )
+    expect(nowhere.rejection).toMatchObject({ kind: 'voidEvent', event: null })
+  })
+
+  test('two rejected items of one site give the lower seq', () => {
+    const first = item(recordEvent('s-1', 'e-2', 'ACTIVITY', day(2)), { status: 409, code: 'INVALID_EVENT_SEQUENCE' })
+    const second = item(recordEvent('s-1', 'e-3', 'CAPTURED', day(3)), { status: 400, code: 'VALIDATION_FAILED' })
+    const view = onlySite(
+      raw({ baitSites: [site('s-1')], events: [event('e-1', 's-1', 'INSTALLED', day(1))], queue: [first, second] }),
+    )
+
+    expect(view.rejection?.seq).toBe(first.seq)
+    expect(view.rejection?.event?.id).toBe('e-2')
+  })
+
+  test('items with no rejection give a null rejection', () => {
+    const view = onlySite(
+      raw({
+        baitSites: [site('s-1')],
+        events: [event('e-1', 's-1', 'INSTALLED', day(1))],
+        queue: [item(recordEvent('s-1', 'e-2', 'ACTIVITY', day(2)))],
+      }),
+    )
+
+    expect(view.rejection).toBeNull()
   })
 
   test('bait sites are in id order, confirmed and pending mixed', () => {
@@ -354,6 +447,50 @@ describe('views cache the merge', () => {
       value: [{ id: P, name: 'Farm', role: 'OWNER', createdAt: null, pending: true, rejection: null }],
     })
     expect(view.getSnapshot()).toBe(second)
+    unsubscribe()
+  })
+})
+
+describe('pending count', () => {
+  test('countPending counts items with no rejection, of every kind and project', () => {
+    const items = [
+      item({ kind: 'createProject', projectId: 'p-9', name: 'Other' }),
+      item(createSite('s-1', 'e-1')),
+      item(recordEvent('s-1', 'e-2', 'ACTIVITY', day(2)), { status: 409, code: 'INVALID_EVENT_SEQUENCE' }),
+      // Blocked behind the rejected one, but still waiting: it counts.
+      item(voidEvent('s-1', 'e-1')),
+    ]
+
+    expect(countPending(items)).toBe(3)
+    expect(countPending([])).toBe(0)
+  })
+
+  test('the view: loading, then the count; the same object while the count is unchanged; a new one when it changes', async () => {
+    const store = createFakeLocalStore()
+    const view = createPendingCountView(store)
+    expect(view.getSnapshot()).toEqual({ status: 'loading' })
+    const unsubscribe = view.subscribe(() => {})
+
+    await vi.waitFor(() => expect(view.getSnapshot()).toEqual({ status: 'ready', value: 0 }))
+    const zero = view.getSnapshot()
+
+    const first = await store.enqueue({ kind: 'createProject', projectId: 'p-1', name: 'Farm' })
+    await vi.waitFor(() => expect(view.getSnapshot()).toEqual({ status: 'ready', value: 1 }))
+    const one = view.getSnapshot()
+    expect(one).not.toBe(zero)
+
+    // The queue changes twice, the count does not: the same snapshot object.
+    await store.markRejected(first.seq, { status: 400, code: 'VALIDATION_FAILED' })
+    await store.enqueue({ kind: 'createProject', projectId: 'p-2', name: 'Farm 2' })
+    expect(await store.queuedItems()).toHaveLength(2)
+    expect(view.getSnapshot()).toBe(one)
+
+    await store.discard(first.seq)
+    expect(view.getSnapshot()).toBe(one)
+    await store.clearRejection(first.seq)
+    await store.enqueue({ kind: 'createProject', projectId: 'p-3', name: 'Farm 3' })
+    await vi.waitFor(() => expect(view.getSnapshot()).toEqual({ status: 'ready', value: 2 }))
+    expect(view.getSnapshot()).not.toBe(one)
     unsubscribe()
   })
 })

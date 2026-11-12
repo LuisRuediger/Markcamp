@@ -528,6 +528,68 @@ export function describeLocalStore(name: string, create: () => Promise<LocalStor
       })
     })
 
+    describe('observeQueue', () => {
+      it('starts loading, then gives the items of every project in seq order', async () => {
+        const store = await create()
+        const queue = store.observeQueue()
+        expect(queue.getSnapshot().status).toBe('loading')
+        expect(await waitUntil(queue, 'an empty queue')).toEqual([])
+
+        const a = await store.enqueue(createProject(P1))
+        const b = await store.enqueue(createSite(P2, 's-2', 'e-2'))
+        const c = await store.enqueue(recordEvent(P1, 's-1', 'e-3'))
+        const d = await store.enqueue(voidEvent(P2, 's-2', 'e-2'))
+
+        expect(await waitUntil(store.observeQueue(), 'the four items')).toEqual([a, b, c, d])
+      })
+
+      it('emits after enqueue, markRejected, clearRejection, discard and confirm', async () => {
+        const store = await create()
+        const queue = store.observeQueue()
+        const recorder = record(queue)
+        await waitUntil(queue, 'ready')
+
+        const a = await store.enqueue(createProject(P1))
+        const b = await store.enqueue(recordEvent(P2, 's-1', 'e-2'))
+        await waitUntil(queue, 'enqueue', (items) => hasSeq(items, a.seq) && hasSeq(items, b.seq))
+
+        await store.markRejected(b.seq, { status: 409, code: 'INVALID_EVENT_SEQUENCE' })
+        await waitUntil(queue, 'markRejected', (items) => items.some((item) => item.seq === b.seq && item.rejection !== null))
+
+        await store.clearRejection(b.seq)
+        await waitUntil(queue, 'clearRejection', (items) => items.some((item) => item.seq === b.seq && item.rejection === null))
+
+        await store.discard(b.seq)
+        await waitUntil(queue, 'discard', (items) => !hasSeq(items, b.seq))
+
+        await store.confirm(a.seq, { kind: 'projectCreated', project: project(P1) })
+        await waitUntil(queue, 'confirm', (items) => items.length === 0)
+        recorder.stop()
+
+        // Every value a listener saw is in seq order.
+        for (const items of recorder.readyValues()) {
+          expect(items.map((item) => item.seq)).toEqual(items.map((item) => item.seq).toSorted((x, y) => x - y))
+        }
+      })
+
+      it('stays ready after its last listener leaves and when one comes back', async () => {
+        const store = await create()
+        const item = await store.enqueue(createProject(P1))
+        const queue = store.observeQueue()
+        // waitUntil subscribes and unsubscribes: afterwards the observable has no listener.
+        await waitUntil(queue, 'the item', (items) => hasSeq(items, item.seq))
+        expect(queue.getSnapshot().status).toBe('ready')
+
+        const recorder = record(queue)
+        expect(queue.getSnapshot().status).toBe('ready')
+        const next = await store.enqueue(createProject(P2))
+        await waitUntil(queue, 'the next item', (items) => hasSeq(items, next.seq))
+        recorder.stop()
+
+        expect(recorder.all().every((snapshot) => snapshot.status === 'ready')).toBe(true)
+      })
+    })
+
     describe('replaceProjects', () => {
       it('replaces only the projects, in id order', async () => {
         const store = await create()

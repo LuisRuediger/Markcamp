@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore, type FormEvent } from 'react'
 import type { LocalCommands } from '../core/localCommands'
 import type { ProjectListEntry } from '../core/localMerge'
 import type { LocalSession, SubmitOutcome } from '../core/localSession'
-import type { Observable } from '../core/localStore'
+import type { Loadable, Observable } from '../core/localStore'
 import type { SessionStore } from '../core/sessionStore'
 import type { SyncEngine } from '../core/syncEngine'
 import { syncIndicator, type SyncIndicator } from '../core/syncIndicator'
@@ -17,12 +17,12 @@ interface HomeScreenProps {
   local: Pick<LocalSession, 'retry' | 'discard'>
   commands: LocalCommands
   email: string | null
-  /** Both belong to one local session: a new session gives new objects. */
+  /** All three belong to one local session: a new session gives new objects. */
   projects: Observable<readonly ProjectListEntry[]>
+  /** Queue items waiting to be sent, of every kind (not only projects). */
+  pendingCount: Observable<number>
   sync: SyncEngine
 }
-
-const NO_PROJECTS: readonly ProjectListEntry[] = []
 
 function indicatorText(indicator: SyncIndicator): string {
   switch (indicator.kind) {
@@ -41,11 +41,11 @@ function indicatorText(indicator: SyncIndicator): string {
   }
 }
 
-function SyncBar({ sync, projects }: { sync: SyncEngine; projects: readonly ProjectListEntry[] }) {
+function SyncBar({ sync, pending }: { sync: SyncEngine; pending: Loadable<number> }) {
   const status = useSyncExternalStore(sync.subscribe, sync.getSnapshot)
   return (
     <>
-      <p role="status">{indicatorText(syncIndicator(status, projects))}</p>
+      <p role="status">{indicatorText(syncIndicator(status, pending))}</p>
       {/* Disabled while a pass runs: visible feedback that the tap was taken. */}
       <button type="button" disabled={status.phase !== 'idle'} onClick={() => void sync.requestSync('full')}>
         {ptBR.sync.syncNow}
@@ -116,8 +116,9 @@ function ProjectRow({ project, local }: { project: ProjectListEntry; local: Home
   )
 }
 
-function HomeScreen({ store, local, commands, email, projects, sync }: HomeScreenProps) {
+function HomeScreen({ store, local, commands, email, projects, pendingCount, sync }: HomeScreenProps) {
   const list = useSyncExternalStore(projects.subscribe, projects.getSnapshot)
+  const pending = useSyncExternalStore(pendingCount.subscribe, pendingCount.getSnapshot)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
@@ -167,7 +168,7 @@ function HomeScreen({ store, local, commands, email, projects, sync }: HomeScree
         {ptBR.home.signOut}
       </button>
 
-      <SyncBar sync={sync} projects={list.status === 'ready' ? list.value : NO_PROJECTS} />
+      <SyncBar sync={sync} pending={pending} />
 
       <h2>{ptBR.projects.title}</h2>
       {renderList()}

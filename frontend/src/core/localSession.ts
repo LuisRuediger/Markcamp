@@ -1,5 +1,5 @@
 import type { LocalAccounts } from './localAccounts'
-import { createProjectsView, type ProjectListEntry } from './localMerge'
+import { createPendingCountView, createProjectsView, type ProjectListEntry } from './localMerge'
 import type { LocalStore, Observable, QueuePayload } from './localStore'
 import type { AppLifecycle, Logger, StoragePersistence } from './ports'
 import type { SessionIdentitySource } from './sessionStore'
@@ -22,6 +22,8 @@ export type LocalSessionSnapshot =
       readonly status: 'ready'
       readonly sync: SyncEngine
       readonly projects: Observable<readonly ProjectListEntry[]>
+      /** Queue items waiting to be sent, of every kind and project (the sync indicator). */
+      readonly pendingCount: Observable<number>
     }
 
 export type SubmitOutcome = 'queued' | 'notReady'
@@ -135,7 +137,12 @@ export function createLocalSession(deps: LocalSessionDeps): LocalSession {
         }
         run.openAttempt = null
         const sync = deps.createSync(store)
-        const ready: ReadySnapshot = { status: 'ready', sync, projects: createProjectsView(store) }
+        const ready: ReadySnapshot = {
+          status: 'ready',
+          sync,
+          projects: createProjectsView(store),
+          pendingCount: createPendingCountView(store),
+        }
         run.runtime = { store, snapshot: ready }
         setSnapshot(ready)
         // A listener may have ended the session already.

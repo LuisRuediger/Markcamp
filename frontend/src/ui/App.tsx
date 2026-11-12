@@ -65,6 +65,7 @@ function SignedIn({ store, local, commands, email }: Omit<AppProps, 'installed'>
           commands={commands}
           email={email}
           projects={snapshot.projects}
+          pendingCount={snapshot.pendingCount}
           sync={snapshot.sync}
         />
       )

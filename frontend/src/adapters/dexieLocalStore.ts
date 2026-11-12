@@ -161,6 +161,10 @@ export async function openDexieLocalStore(userId: string, logger: Logger): Promi
           })),
       ),
 
+    // One table, so one read is already consistent: no explicit transaction needed. Primary-key
+    // order is seq order. No index: the whole queue is the answer (version 1 stays as it is).
+    observeQueue: () => observe((): Promise<readonly QueueItem[]> => db.queue.toArray()),
+
     async enqueue(payload) {
       // The key generator assigns seq; never computed here.
       const seq = await db.queue.add({ payload, rejection: null })

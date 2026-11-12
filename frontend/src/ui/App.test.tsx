@@ -16,7 +16,7 @@ function renderApp(
   installed = true,
 ) {
   const store = createFakeStore(session)
-  const commands = createLocalCommands(local, { newId: () => 'id-1' })
+  const commands = createLocalCommands(local, { newId: () => 'id-1' }, () => new Date('2026-11-12T12:00:00Z'))
   render(<App store={store} local={local} commands={commands} installed={installed} />)
   return { store, local }
 }

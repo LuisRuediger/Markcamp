@@ -3,6 +3,7 @@ import { sortIntoHistoryOrder, type HistoryInstant } from './historyOrder'
 import {
   LOADING,
   type LocalBaitSite,
+  type LocalEvent,
   type LocalSpecies,
   type Loadable,
   type LocalStore,
@@ -66,8 +67,33 @@ export interface BaitSiteView {
   readonly pendingVoidEventIds: readonly string[]
   /** replay() over `events`: the status is always computed on the device. */
   readonly replay: ReplayResult
-  /** Some queue item of this site has a rejection. */
-  readonly rejected: boolean
+  /** The rejected item of this site with the lowest seq, or null. */
+  readonly rejection: BaitSiteRejection | null
+}
+
+/**
+ * Only the lowest seq: it blocks the following items of the same site (decision E2 of slice
+ * F2c), and once it is retried or discarded the next one shows. Same shape and reason as
+ * ProjectListEntry.rejection.
+ */
+export interface BaitSiteRejection {
+  readonly seq: number
+  readonly status: number
+  readonly code: string | null
+  readonly kind: 'createBaitSite' | 'recordEvent' | 'voidEvent'
+  /**
+   * The event the item is about, so the screen can say "Captura de 12/11, 15:30": the
+   * INSTALLED of a createBaitSite, the recorded event, or the voided one (looked up among the
+   * site's confirmed and pending events before pending voids hide it). null only when a
+   * voided event is in neither.
+   */
+  readonly event: RejectedEvent | null
+}
+
+export interface RejectedEvent {
+  readonly id: string
+  readonly type: BaitSiteEventType
+  readonly occurredAt: HistoryInstant
 }
 
 export interface ProjectView {
@@ -141,16 +167,45 @@ export function mergeProjects(raw: ProjectsRaw): readonly ProjectListEntry[] {
 type PendingSite = Omit<LocalBaitSite, 'projectId' | 'createdAt'>
 type PendingEvent = Omit<EventView, 'recordedAt' | 'pending'>
 
+/** A site's first rejected item, before its event is known (a voided event is looked up after the loop). */
+interface FoundRejection {
+  readonly seq: number
+  readonly status: number
+  readonly code: string | null
+  readonly kind: BaitSiteRejection['kind']
+  /** Known from the payload, or the id of the voided event to look up. */
+  readonly event: RejectedEvent | { readonly voidedId: string }
+}
+
+/**
+ * The voided event as the site had it before any pending void: confirmed first (the server's
+ * data), then pending. Only among this site's events: an id of another site is not this item.
+ */
+function voidedEvent(
+  eventId: string,
+  baitSiteId: string,
+  confirmed: readonly LocalEvent[],
+  pending: ReadonlyMap<string, PendingEvent>,
+): RejectedEvent | null {
+  const found = confirmed.find((candidate) => candidate.id === eventId) ?? pending.get(eventId)
+  if (found === undefined || found.baitSiteId !== baitSiteId) return null
+  return { id: found.id, type: found.type, occurredAt: found.occurredAt }
+}
+
 export function mergeProject(raw: ProjectRaw): ProjectView {
   const pendingSites = new Map<string, PendingSite>()
   const pendingEvents = new Map<string, PendingEvent>()
   // Void items per site, in seq order, and every voided id (ids are unique across sites).
   const voidsBySite = new Map<string, Set<string>>()
   const voidedIds = new Set<string>()
-  const rejectedSites = new Set<string>()
+  // The queue is in seq order, so the first rejected item met for a site has the lowest seq.
+  const rejections = new Map<string, FoundRejection>()
+  function addRejection(baitSiteId: string, found: FoundRejection): void {
+    if (!rejections.has(baitSiteId)) rejections.set(baitSiteId, found)
+  }
 
   // No default branch: a new payload kind does not compile until the merge handles it.
-  for (const { payload, rejection } of raw.queue) {
+  for (const { seq, payload, rejection } of raw.queue) {
     switch (payload.kind) {
       case 'createProject':
         continue // Handled by pendingProjects below.
@@ -176,7 +231,15 @@ export function mergeProject(raw: ProjectRaw): ProjectView {
             identifiedEventId: null,
           })
         }
-        if (rejection !== null) rejectedSites.add(baitSiteId)
+        if (rejection !== null) {
+          addRejection(baitSiteId, {
+            seq,
+            status: rejection.status,
+            code: rejection.code,
+            kind: payload.kind,
+            event: { id: installation.id, type: 'INSTALLED', occurredAt: installation.occurredAt },
+          })
+        }
         break
       }
       case 'recordEvent':
@@ -190,7 +253,15 @@ export function mergeProject(raw: ProjectRaw): ProjectView {
             identifiedEventId: payload.identifiedEventId,
           })
         }
-        if (rejection !== null) rejectedSites.add(payload.baitSiteId)
+        if (rejection !== null) {
+          addRejection(payload.baitSiteId, {
+            seq,
+            status: rejection.status,
+            code: rejection.code,
+            kind: payload.kind,
+            event: { id: payload.eventId, type: payload.type, occurredAt: payload.occurredAt },
+          })
+        }
         break
       case 'voidEvent': {
         let voids = voidsBySite.get(payload.baitSiteId)
@@ -200,7 +271,15 @@ export function mergeProject(raw: ProjectRaw): ProjectView {
         }
         voids.add(payload.eventId)
         voidedIds.add(payload.eventId)
-        if (rejection !== null) rejectedSites.add(payload.baitSiteId)
+        if (rejection !== null) {
+          addRejection(payload.baitSiteId, {
+            seq,
+            status: rejection.status,
+            code: rejection.code,
+            kind: payload.kind,
+            event: { voidedId: payload.eventId },
+          })
+        }
         break
       }
     }
@@ -232,6 +311,16 @@ export function mergeProject(raw: ProjectRaw): ProjectView {
     if (!confirmedEventIds.has(event.id)) addEvent({ ...event, recordedAt: null, pending: true })
   }
 
+  function siteRejection(baitSiteId: string): BaitSiteRejection | null {
+    const found = rejections.get(baitSiteId)
+    if (found === undefined) return null
+    const { event, ...rest } = found
+    return {
+      ...rest,
+      event: 'voidedId' in event ? voidedEvent(event.voidedId, baitSiteId, raw.events, pendingEvents) : event,
+    }
+  }
+
   // Sites: confirmed data wins; a site only in the queue comes from its createBaitSite item.
   // Events (and voids) of a site that exists in neither are left out.
   const confirmedSites = new Map(raw.baitSites.map((site) => [site.id, site]))
@@ -253,7 +342,7 @@ export function mergeProject(raw: ProjectRaw): ProjectView {
       events,
       pendingVoidEventIds: [...(voidsBySite.get(id) ?? [])],
       replay: replay(events),
-      rejected: rejectedSites.has(id),
+      rejection: siteRejection(id),
     })
   }
 
@@ -295,4 +384,37 @@ export function createProjectsView(store: LocalStore): Observable<readonly Proje
 
 export function createProjectView(store: LocalStore, projectId: string): Observable<ProjectView> {
   return cachedView(store.observeProject(projectId), mergeProject)
+}
+
+/**
+ * Queue items still waiting to be sent, of every kind and project: those with no rejection.
+ * Rejected items show on their own row (decision E5 of slice F2c); items blocked behind a
+ * rejected one have no rejection of their own and are still waiting, so they count.
+ */
+export function countPending(items: readonly QueueItem[]): number {
+  return items.filter((item) => item.rejection === null).length
+}
+
+/**
+ * The pending count over the whole queue (the sync indicator). Returns the same snapshot
+ * object while the count does not change, even when the queue does (an item rejected and
+ * another enqueued), so useSyncExternalStore re-renders only for a new number.
+ */
+export function createPendingCountView(store: LocalStore): Observable<number> {
+  const source = store.observeQueue()
+  let lastRaw: Loadable<readonly QueueItem[]> | null = null
+  let lastView: Loadable<number> = LOADING
+  return {
+    subscribe: (listener) => source.subscribe(listener),
+    getSnapshot() {
+      const raw = source.getSnapshot()
+      if (raw === lastRaw) return lastView
+      lastRaw = raw
+      // The source never goes back to loading once ready (Observable), so neither does this.
+      if (raw.status === 'loading') return lastView
+      const count = countPending(raw.value)
+      if (lastView.status === 'loading' || lastView.value !== count) lastView = { status: 'ready', value: count }
+      return lastView
+    },
+  }
 }

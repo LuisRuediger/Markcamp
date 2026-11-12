@@ -600,6 +600,21 @@ describe('writes', () => {
     expect(requests).toEqual(['full', 'upload'])
   })
 
+  test("15e. the ready snapshot's pendingCount reflects the store's queue", async () => {
+    const t = await readyAsA()
+    const { store } = t.engines[0]!
+    const snapshot = t.local.getSnapshot()
+    if (snapshot.status !== 'ready') throw new Error('not ready')
+    const { pendingCount } = snapshot
+    const unsubscribe = pendingCount.subscribe(() => {})
+
+    await vi.waitFor(() => expect(pendingCount.getSnapshot()).toEqual({ status: 'ready', value: 0 }))
+    await t.local.submit(PROJECT)
+    await store.enqueue({ kind: 'voidEvent', projectId: 'project-1', baitSiteId: 's-1', eventId: 'e-1' })
+    await vi.waitFor(() => expect(pendingCount.getSnapshot()).toEqual({ status: 'ready', value: 2 }))
+    unsubscribe()
+  })
+
   test('15b. submit when not ready: notReady, nothing enqueued', async () => {
     const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
     await expect(t.local.submit(PROJECT)).resolves.toBe('notReady')

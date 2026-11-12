@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import { createFakeLocalStore } from '../core/fakeLocalStore'
-import { createProjectsView } from '../core/localMerge'
+import { createPendingCountView, createProjectsView } from '../core/localMerge'
 import type { LocalSession, LocalSessionSnapshot } from '../core/localSession'
 import type { LocalStore } from '../core/localStore'
 import type { SyncEngine, SyncStatus } from '../core/syncEngine'
@@ -62,10 +62,11 @@ export function createFakeLocalSession(initial: LocalSessionSnapshot = { status:
   }
 }
 
-/** A ready local session over a fake LocalStore and the real projects view. */
+/** A ready local session over a fake LocalStore and the real projects and pending count views. */
 export function createReadyLocalSession(store: LocalStore = createFakeLocalStore()) {
   const sync = createFakeSyncEngine()
   const projects = createProjectsView(store)
-  const local = createFakeLocalSession({ status: 'ready', sync, projects })
-  return { store, sync, projects, local }
+  const pendingCount = createPendingCountView(store)
+  const local = createFakeLocalSession({ status: 'ready', sync, projects, pendingCount })
+  return { store, sync, projects, pendingCount, local }
 }

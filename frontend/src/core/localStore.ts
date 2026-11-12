@@ -253,6 +253,12 @@ export function assertSnapshotBelongsTo(projectId: string, snapshot: ProjectSnap
 export interface LocalStore {
   observeProjects(): Observable<ProjectsRaw>
   observeProject(projectId: string): Observable<ProjectRaw>
+  /**
+   * Every queue item of every project, in seq order (the raw queue, decision P5 of slice
+   * F2b-1: the port delivers data, the rules that read it live in core). Same contract as
+   * the other reads. Read by the pending count of the sync indicator (localMerge.ts).
+   */
+  observeQueue(): Observable<readonly QueueItem[]>
 
   /** Adds an item with the next seq and no rejection. */
   enqueue(payload: QueuePayload): Promise<QueueItem>

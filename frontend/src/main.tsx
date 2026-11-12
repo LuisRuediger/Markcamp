@@ -51,7 +51,7 @@ if (firebaseConfig.ok) {
     persistence: createStoragePersistence(),
     logger,
   })
-  const commands = createLocalCommands(local, createUuidV7Generator())
+  const commands = createLocalCommands(local, createUuidV7Generator(), () => new Date())
   // Once per run: installing opens another window (Android) or another storage (iOS).
   const installed = isInstalledApp()
 

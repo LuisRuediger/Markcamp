@@ -4,6 +4,7 @@ import { createFakeLocalStore } from '../core/fakeLocalStore'
 import { createLocalCommands } from '../core/localCommands'
 import type { SubmitOutcome } from '../core/localSession'
 import type { LocalStore, QueueRejection } from '../core/localStore'
+import { toHistoryInstant, type HistoryInstant } from '../core/historyOrder'
 import type { Project } from '../core/project'
 import { createReadyLocalSession } from './fakeLocalSession'
 import { createFakeStore } from './fakeSessionStore'
@@ -11,6 +12,12 @@ import HomeScreen from './HomeScreen'
 import { ptBR } from './i18n/pt-BR'
 
 const SESSION = { status: 'signedIn', email: 'a@b.c', backend: 'ok' } as const
+
+function instant(value: string): HistoryInstant {
+  const result = toHistoryInstant(value)
+  if (result === null) throw new Error(`not an instant: ${value}`)
+  return result
+}
 
 function project(id: string, name: string): Project {
   return { id, name, role: 'OWNER', createdAt: '2026-11-07T12:00:00Z' }
@@ -20,17 +27,29 @@ function project(id: string, name: string): Project {
 async function setup(prepare: (store: LocalStore) => Promise<void> = async () => {}) {
   const fakeStore = createFakeLocalStore()
   await prepare(fakeStore)
-  const { sync, projects, local } = createReadyLocalSession(fakeStore)
+  const { sync, projects, pendingCount, local } = createReadyLocalSession(fakeStore)
   let count = 0
-  const commands = createLocalCommands(local, {
-    newId: () => {
-      count += 1
-      return `new-${count}`
+  const commands = createLocalCommands(
+    local,
+    {
+      newId: () => {
+        count += 1
+        return `new-${count}`
+      },
     },
-  })
+    () => new Date('2026-11-12T12:00:00Z'),
+  )
   const session = createFakeStore(SESSION)
   render(
-    <HomeScreen store={session} local={local} commands={commands} email="a@b.c" projects={projects} sync={sync} />,
+    <HomeScreen
+      store={session}
+      local={local}
+      commands={commands}
+      email="a@b.c"
+      projects={projects}
+      pendingCount={pendingCount}
+      sync={sync}
+    />,
   )
   return {
     session,
@@ -279,6 +298,34 @@ describe('sync indicator', () => {
 
     act(() => sync.setStatus({ phase: 'idle', lastResult: 'unavailable' }))
     expect(status()).toBe(`${ptBR.sync.offline}. ${ptBR.sync.pending(2)}`)
+  })
+
+  test('a queued bait site counts although no project is pending', async () => {
+    await setup(async (store) => {
+      await store.replaceProjects([project('p-1', 'Apiário')])
+      await store.enqueue({
+        kind: 'createBaitSite',
+        projectId: 'p-1',
+        baitSiteId: 's-1',
+        name: 'Isca 1',
+        latitude: -27.1,
+        longitude: -49.1,
+        locationAccuracyM: 5,
+        installation: { id: 'e-1', occurredAt: instant('2026-11-12T10:00:00Z') },
+      })
+    })
+
+    expect(within(await row('Apiário')).queryByText(ptBR.projects.pendingMark, { exact: false })).toBeNull()
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('1 registro aguardando envio'))
+  })
+
+  test('a rejected item alone is not counted: synced', async () => {
+    await setup(async (store) => {
+      await rejectedProject(store, 'p-1', 'Blank', { status: 400, code: 'VALIDATION_FAILED' })
+    })
+
+    await row('Blank')
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(ptBR.sync.synced))
   })
 
   test('the pending phrase is singular for one', () => {

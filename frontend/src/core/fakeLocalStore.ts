@@ -151,6 +151,8 @@ export function createFakeLocalStore(): LocalStore {
   return {
     observeProjects: () => observe(projectsRaw),
     observeProject: (projectId) => observe((current) => projectRaw(current, projectId)),
+    // The State's own array: it is replaced, never mutated, so handing it out is safe.
+    observeQueue: () => observe((current) => current.queue),
 
     async enqueue(payload) {
       const item: QueueItem = { seq: state.nextSeq, payload, rejection: null }
