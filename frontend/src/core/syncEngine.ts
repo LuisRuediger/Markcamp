@@ -1,7 +1,7 @@
 import type { ApiClient, ApiRequest, ApiResult } from './apiClient'
 import type { Confirmation, LocalEvent, LocalStore, QueueItem, QueueRejection } from './localStore'
 import type { Logger, Timers } from './ports'
-import { parseProject, parseProjectList } from './projectsStore'
+import { parseProject, parseProjectList } from './project'
 import {
   ID_NOT_OURS,
   LIST_PROJECTS_REQUEST,

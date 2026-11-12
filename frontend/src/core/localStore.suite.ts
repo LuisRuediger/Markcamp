@@ -16,7 +16,7 @@ import type {
   QueueItem,
   QueuePayload,
 } from './localStore'
-import type { Project } from './projectsStore'
+import type { Project } from './project'
 
 // The behaviour every LocalStore must have, written once (decision P6 of slice F2b-1).
 // Run by fakeLocalStore.test.ts now and by the Dexie adapter's test in F2b-2: if the fake

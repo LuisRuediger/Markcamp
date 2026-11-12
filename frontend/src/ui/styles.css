@@ -42,6 +42,13 @@ form > button {
   width: 100%;
 }
 
+.install-banner {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  background: #fff4d6;
+  border-bottom: 1px solid #e0c060;
+}
+
 [role='alert'] {
   color: #b00020;
 }

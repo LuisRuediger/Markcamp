@@ -1,6 +1,6 @@
 import type { BaitSiteEventType } from './baitSiteStateMachine'
 import type { HistoryInstant } from './historyOrder'
-import type { Project } from './projectsStore'
+import type { Project } from './project'
 
 // The local database as core sees it (ADR 0008, decisions 2, 3, 7 and 10). Implemented by
 // the Dexie adapter (slice F2b-2) and by fakeLocalStore.ts for tests. The merge of confirmed

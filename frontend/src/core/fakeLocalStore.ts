@@ -1,4 +1,4 @@
-import type { Project } from './projectsStore'
+import type { Project } from './project'
 import {
   LOADING,
   assertConfirmationMatches,

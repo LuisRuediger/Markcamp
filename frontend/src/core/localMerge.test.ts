@@ -13,7 +13,7 @@ import type {
   QueuePayload,
   QueueRejection,
 } from './localStore'
-import type { Project } from './projectsStore'
+import type { Project } from './project'
 
 const P = 'p-1'
 
@@ -231,31 +231,92 @@ describe('mergeProject', () => {
       role: 'MEMBER',
       createdAt: '2026-11-01T12:00:00Z',
       pending: false,
-      rejected: false,
+      rejection: null,
     })
-    expect(
-      mergeProject(raw({ queue: [item({ kind: 'createProject', projectId: P, name: 'New' }, { status: 422, code: null })] })).project,
-    ).toEqual({ id: P, name: 'New', role: 'OWNER', createdAt: null, pending: true, rejected: true })
+    const rejected = item({ kind: 'createProject', projectId: P, name: 'New' }, { status: 422, code: null })
+    expect(mergeProject(raw({ queue: [rejected] })).project).toEqual({
+      id: P,
+      name: 'New',
+      role: 'OWNER',
+      createdAt: null,
+      pending: true,
+      rejection: { seq: rejected.seq, status: 422, code: null },
+    })
+  })
+
+  test('the project of a ProjectView carries the rejection of its createProject item', () => {
+    const first = item({ kind: 'createProject', projectId: P, name: 'New' })
+    const second = item({ kind: 'createProject', projectId: P, name: 'New' }, { status: 400, code: 'VALIDATION_FAILED' })
+
+    expect(mergeProject(raw({ queue: [first, second] })).project?.rejection).toEqual({
+      seq: second.seq,
+      status: 400,
+      code: 'VALIDATION_FAILED',
+    })
   })
 })
 
 describe('mergeProjects', () => {
   test('confirmed and pending projects in id order; a pending one has no date', () => {
+    const rejected = item({ kind: 'createProject', projectId: 'p-4', name: 'Rejected' }, { status: 422, code: 'VALIDATION_FAILED' })
     const merged = mergeProjects({
       projects: [project('p-1'), project('p-3', 'Confirmed name')],
       queue: [
-        item({ kind: 'createProject', projectId: 'p-4', name: 'Rejected' }, { status: 422, code: 'VALIDATION_FAILED' }),
+        rejected,
         item({ kind: 'createProject', projectId: 'p-2', name: 'Offline' }),
         item({ kind: 'createProject', projectId: 'p-3', name: 'Queued name' }),
       ],
     })
 
     expect(merged).toEqual([
-      { id: 'p-1', name: 'Farm', role: 'MEMBER', createdAt: '2026-11-01T12:00:00Z', pending: false, rejected: false },
-      { id: 'p-2', name: 'Offline', role: 'OWNER', createdAt: null, pending: true, rejected: false },
-      { id: 'p-3', name: 'Confirmed name', role: 'MEMBER', createdAt: '2026-11-01T12:00:00Z', pending: true, rejected: false },
-      { id: 'p-4', name: 'Rejected', role: 'OWNER', createdAt: null, pending: true, rejected: true },
+      { id: 'p-1', name: 'Farm', role: 'MEMBER', createdAt: '2026-11-01T12:00:00Z', pending: false, rejection: null },
+      { id: 'p-2', name: 'Offline', role: 'OWNER', createdAt: null, pending: true, rejection: null },
+      { id: 'p-3', name: 'Confirmed name', role: 'MEMBER', createdAt: '2026-11-01T12:00:00Z', pending: true, rejection: null },
+      {
+        id: 'p-4',
+        name: 'Rejected',
+        role: 'OWNER',
+        createdAt: null,
+        pending: true,
+        rejection: { seq: rejected.seq, status: 422, code: 'VALIDATION_FAILED' },
+      },
     ])
+  })
+
+  test('a rejected createProject gives its seq, status and code', () => {
+    const rejected = item({ kind: 'createProject', projectId: 'p-1', name: 'Farm' }, { status: 409, code: 'ID_ALREADY_EXISTS' })
+
+    expect(mergeProjects({ projects: [], queue: [rejected] })[0]?.rejection).toEqual({
+      seq: rejected.seq,
+      status: 409,
+      code: 'ID_ALREADY_EXISTS',
+    })
+  })
+
+  test('two items for the same project, the second rejected, give the second one seq', () => {
+    const first = item({ kind: 'createProject', projectId: 'p-1', name: 'Farm' })
+    const second = item({ kind: 'createProject', projectId: 'p-1', name: 'Farm' }, { status: 400, code: 'VALIDATION_FAILED' })
+
+    const [entry] = mergeProjects({ projects: [], queue: [first, second] })
+
+    expect(entry?.rejection?.seq).toBe(second.seq)
+    expect(entry?.rejection?.seq).not.toBe(first.seq)
+  })
+
+  test('two rejected items for the same project give the lower seq', () => {
+    const first = item({ kind: 'createProject', projectId: 'p-1', name: 'Farm' }, { status: 400, code: 'VALIDATION_FAILED' })
+    const second = item({ kind: 'createProject', projectId: 'p-1', name: 'Farm' }, { status: 500, code: null })
+
+    expect(mergeProjects({ projects: [], queue: [first, second] })[0]?.rejection?.seq).toBe(first.seq)
+  })
+
+  test('items with no rejection give a null rejection', () => {
+    const merged = mergeProjects({
+      projects: [project('p-1')],
+      queue: [item({ kind: 'createProject', projectId: 'p-1', name: 'Farm' }), item({ kind: 'createProject', projectId: 'p-2', name: 'New' })],
+    })
+
+    expect(merged.map((entry) => entry.rejection)).toEqual([null, null])
   })
 })
 
@@ -290,7 +351,7 @@ describe('views cache the merge', () => {
     const second = view.getSnapshot()
     expect(second).toEqual({
       status: 'ready',
-      value: [{ id: P, name: 'Farm', role: 'OWNER', createdAt: null, pending: true, rejected: false }],
+      value: [{ id: P, name: 'Farm', role: 'OWNER', createdAt: null, pending: true, rejection: null }],
     })
     expect(view.getSnapshot()).toBe(second)
     unsubscribe()

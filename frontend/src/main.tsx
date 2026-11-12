@@ -6,14 +6,15 @@ import { createBrowserTimers } from './adapters/browserTimers'
 import { createConsoleLogger } from './adapters/consoleLogger'
 import { createDexieLocalAccounts } from './adapters/dexieLocalAccounts'
 import { openDexieLocalStore } from './adapters/dexieLocalStore'
+import { isInstalledApp } from './adapters/displayMode'
 import { createFetchTransport } from './adapters/fetchTransport'
 import { createFirebaseAuth } from './adapters/firebaseAuth'
 import { createStoragePersistence } from './adapters/storagePersistence'
 import { createUuidV7Generator } from './adapters/uuidV7Generator'
 import { createApiClient } from './core/apiClient'
 import { parseFirebaseConfig } from './core/config'
+import { createLocalCommands } from './core/localCommands'
 import { createLocalSession } from './core/localSession'
-import { createProjectsStore } from './core/projectsStore'
 import { createSessionStore } from './core/sessionStore'
 import { createSyncEngine } from './core/syncEngine'
 import App from './ui/App'
@@ -37,13 +38,11 @@ if (firebaseConfig.ok) {
   const api = createApiClient(auth, createFetchTransport(API_BASE))
   const logger = createConsoleLogger()
   const store = createSessionStore(auth, api, logger)
-  const projects = createProjectsStore(store, api, createUuidV7Generator(), logger)
   const timers = createBrowserTimers()
 
-  // Opens each session's local database and runs the sync engine over it (ADR 0008). Not
-  // passed to App yet: slice F2d-2 moves the project screen onto it. Until then the screen
-  // still reads GET /projects through `projects`, and the engine reads it too.
-  createLocalSession({
+  // Opens each session's local database and runs the sync engine over it (ADR 0008). The
+  // screens read and write only through it.
+  const local = createLocalSession({
     session: store,
     accounts: createDexieLocalAccounts(),
     openStore: (userId) => openDexieLocalStore(userId, logger),
@@ -52,10 +51,13 @@ if (firebaseConfig.ok) {
     persistence: createStoragePersistence(),
     logger,
   })
+  const commands = createLocalCommands(local, createUuidV7Generator())
+  // Once per run: installing opens another window (Android) or another storage (iOS).
+  const installed = isInstalledApp()
 
   root.render(
     <StrictMode>
-      <App store={store} projects={projects} />
+      <App store={store} local={local} commands={commands} installed={installed} />
     </StrictMode>,
   )
 } else {

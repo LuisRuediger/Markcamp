@@ -1,9 +1,11 @@
-import type { CreateProjectFailure } from '../../core/projectsStore'
 import type { SignInFailureKind } from '../../core/sessionStore'
 
 export const ptBR = {
   appTitle: 'MarkCamp',
   loading: 'Carregando…',
+  retry: 'Tentar de novo',
+  installBanner:
+    'Instale o MarkCamp na tela de início para não perder registros ainda não enviados. No iPhone: Compartilhar → Adicionar à Tela de Início.',
   configError: {
     title: 'Erro de configuração',
     missingVariables: 'Variáveis de ambiente ausentes:',
@@ -26,26 +28,34 @@ export const ptBR = {
   home: {
     signedInAs: (email: string) => `Você entrou como ${email}`,
     signedIn: 'Você entrou',
-    backendChecking: 'Conectando ao servidor…',
-    backendOk: 'Conectado',
-    backendUnavailable: 'Servidor indisponível no momento',
     signOut: 'Sair',
+  },
+  localSession: {
+    needsFirstOnline: 'O primeiro acesso neste aparelho precisa de internet.',
+    failed: 'Não foi possível abrir os dados deste aparelho. Feche o app e abra de novo.',
+  },
+  sync: {
+    syncing: 'Sincronizando…',
+    offline: 'Sem conexão com o servidor. Seus registros ficam no aparelho',
+    // "registros", not "projetos": the same text holds when bait sites and events are queued.
+    pending: (count: number) => (count === 1 ? '1 registro aguardando envio' : `${count} registros aguardando envio`),
+    notYet: 'Ainda não sincronizado',
+    synced: 'Sincronizado',
+    syncNow: 'Sincronizar agora',
   },
   projects: {
     title: 'Projetos',
     loading: 'Carregando projetos…',
-    unavailable: 'Não foi possível carregar os projetos',
-    retry: 'Tentar de novo',
     empty: 'Crie seu primeiro projeto',
     nameLabel: 'Nome do projeto',
     create: 'Criar projeto',
-    errors: {
-      nameRequired: 'Informe um nome para o projeto',
-      nameTooLong: 'Nome muito longo (máximo de 100 caracteres)',
-      nameInvalid: 'O nome tem caracteres que não são permitidos',
-      // Must not say the project was not created: the response may have been lost.
-      unavailable: 'Sem conexão. Tente de novo',
-      unknown: 'Não foi possível criar o projeto. Tente de novo',
-    } satisfies Record<CreateProjectFailure, string>,
+    pendingMark: 'aguardando envio',
+    rejectedName: 'O servidor recusou o nome deste projeto (não pode ficar em branco nem passar de 100 caracteres)',
+    rejectedOther: 'O servidor recusou este projeto',
+    discard: 'Descartar',
+    confirmDiscard: 'Confirmar descarte',
+    cancel: 'Cancelar',
+    saveFailed: 'Não foi possível salvar no aparelho. Tente de novo',
+    changeFailed: 'Não foi possível alterar o registro no aparelho. Tente de novo',
   },
 } as const

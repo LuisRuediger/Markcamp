@@ -11,7 +11,7 @@ import {
   type ProjectsRaw,
   type QueueItem,
 } from './localStore'
-import type { Project, ProjectRole } from './projectsStore'
+import type { Project, ProjectRole } from './project'
 
 // The merge of confirmed copy + queue (ADR 0008, decision 2). This is the only place pending
 // data reaches a screen (ADR 0008, derived rule 1): screens read the views made here, never
@@ -31,9 +31,11 @@ export interface ProjectListEntry {
   readonly createdAt: string | null
   /** Its createProject item is still in the queue. */
   readonly pending: boolean
-  /** Its createProject item has a rejection. */
-  readonly rejected: boolean
+  /** The rejected createProject item with the lowest seq, or null. */
+  readonly rejection: { readonly seq: number; readonly status: number; readonly code: string | null } | null
 }
+
+type ProjectRejection = NonNullable<ProjectListEntry['rejection']>
 
 export interface EventView {
   readonly id: string
@@ -84,19 +86,23 @@ function compareIds(a: { readonly id: string }, b: { readonly id: string }): num
 
 interface PendingProject {
   readonly name: string
-  rejected: boolean
+  rejection: ProjectRejection | null
 }
 
-/** createProject items by project id; the first item gives the data, any rejection counts. */
+/**
+ * createProject items by project id; the first item gives the data. The queue is in seq
+ * order, so the first rejected item met is the one with the lowest seq.
+ */
 function pendingProjects(queue: readonly QueueItem[]): Map<string, PendingProject> {
   const result = new Map<string, PendingProject>()
-  for (const { payload, rejection } of queue) {
+  for (const { seq, payload, rejection } of queue) {
     if (payload.kind !== 'createProject') continue
+    const found = rejection === null ? null : { seq, status: rejection.status, code: rejection.code }
     const existing = result.get(payload.projectId)
     if (existing === undefined) {
-      result.set(payload.projectId, { name: payload.name, rejected: rejection !== null })
-    } else if (rejection !== null) {
-      existing.rejected = true
+      result.set(payload.projectId, { name: payload.name, rejection: found })
+    } else if (existing.rejection === null) {
+      existing.rejection = found
     }
   }
   return result
@@ -110,12 +116,12 @@ function projectEntry(id: string, confirmed: Project | undefined, pending: Pendi
       role: confirmed.role,
       createdAt: confirmed.createdAt,
       pending: pending !== undefined,
-      rejected: pending?.rejected ?? false,
+      rejection: pending?.rejection ?? null,
     }
   }
   if (pending !== undefined) {
     // Only the creator has a createProject item, and the creator is the owner.
-    return { id, name: pending.name, role: 'OWNER', createdAt: null, pending: true, rejected: pending.rejected }
+    return { id, name: pending.name, role: 'OWNER', createdAt: null, pending: true, rejection: pending.rejection }
   }
   return null
 }

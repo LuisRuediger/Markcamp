@@ -15,7 +15,7 @@ import {
   type QueueItem,
 } from '../core/localStore'
 import type { Logger } from '../core/ports'
-import type { Project } from '../core/projectsStore'
+import type { Project } from '../core/project'
 
 // The LocalStore port on IndexedDB through Dexie (ADR 0008, decision 10). Only transactions
 // and queries live here: every rule (what matches, what belongs where) is core's.

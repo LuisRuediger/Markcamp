@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { SessionSnapshot, SessionStore } from '../core/sessionStore'
+import type { SessionIdentitySource, SessionSnapshot, SessionStore } from '../core/sessionStore'
 
 // Test helper. A fixed snapshot: screen transitions belong to the session store's own tests.
 export function createFakeStore(snapshot: SessionSnapshot) {
@@ -9,5 +9,6 @@ export function createFakeStore(snapshot: SessionSnapshot) {
     signInWithEmail: vi.fn<SessionStore['signInWithEmail']>(async () => null),
     signInWithGoogle: vi.fn<SessionStore['signInWithGoogle']>(async () => null),
     signOut: vi.fn<SessionStore['signOut']>(async () => {}),
-  } satisfies SessionStore
+    retryBackendCheck: vi.fn<SessionIdentitySource['retryBackendCheck']>(() => {}),
+  } satisfies SessionStore & Pick<SessionIdentitySource, 'retryBackendCheck'>
 }
