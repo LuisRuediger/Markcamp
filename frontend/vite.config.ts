@@ -1,9 +1,11 @@
 import react from '@vitejs/plugin-react'
+import { loadEnv } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vitest/config'
+import { previewAllowedHosts } from './previewHost.ts'
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     VitePWA({
@@ -42,8 +44,27 @@ export default defineConfig({
       '/api': 'http://localhost:8080',
     },
   },
+  preview: {
+    // Opened from a phone through Tailscale Serve. preview.proxy is not set: Vite falls
+    // back to server.proxy.
+    // Pinned to 127.0.0.1:4173, the address tailscale serve forwards to ('localhost' can
+    // resolve to ::1 on macOS). strictPort fails instead of moving to another port:
+    // whatever listens on 4173 is published to the tailnet at MarkCamp's origin.
+    host: '127.0.0.1',
+    port: 4173,
+    strictPort: true,
+    // The tailnet host name, accepted in the Host header.
+    allowedHosts: previewAllowedHosts(previewHostVariable(mode)),
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['src/ui/test-setup.ts'],
   },
-})
+}))
+
+// MARKCAMP_ (not VITE_) on purpose: only VITE_ variables can reach the bundle.
+// The config file's own directory (not process.cwd()), so running Vite from another
+// folder still reads frontend/.env.local.
+function previewHostVariable(mode: string): string | undefined {
+  return loadEnv(mode, import.meta.dirname, 'MARKCAMP_')['MARKCAMP_PREVIEW_HOST']
+}
