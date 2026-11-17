@@ -74,6 +74,11 @@ form > button {
   margin: 0.25rem 0.5rem 0 0;
 }
 
+/* The species picker open on a capture row: the select on its own line, the buttons below. */
+.identify label {
+  margin-top: 0.5rem;
+}
+
 .install-banner {
   margin: 0;
   padding: 0.75rem 1rem;

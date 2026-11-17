@@ -33,51 +33,60 @@ export function hasPendingChanges(site: BaitSiteView): boolean {
 }
 
 /**
- * The latest CAPTURED in site.events (history order), or null. What an IDENTIFIED points to
- * (decision J4 of slice F3). Picked with compareHistoryOrder, not by array position.
+ * The species that counts for this capture (ADR 0005, derived rule 4): the speciesId of the
+ * latest IDENTIFIED in site.events pointing to it, by compareHistoryOrder (not by array
+ * position), else the capture's own speciesId (null when it has none). site.events holds
+ * only non-voided events, and a pending void already hides its event (P2), so a voided
+ * identification never counts.
+ *
+ * Meant for CAPTURED events; for any other type it returns the event's own speciesId (only
+ * a CAPTURED can be the target of an IDENTIFIED, ADR 0005, rule 5).
  */
-export function identificationTarget(site: BaitSiteView): EventView | null {
+export function effectiveSpeciesId(site: BaitSiteView, capture: EventView): string | null {
+  if (capture.type !== 'CAPTURED') return capture.speciesId
   let latest: EventView | null = null
   for (const event of site.events) {
-    if (event.type !== 'CAPTURED') continue
+    if (event.type !== 'IDENTIFIED' || event.identifiedEventId !== capture.id) continue
     if (latest === null || compareHistoryOrder(event, latest) > 0) latest = event
   }
-  return latest
+  return latest === null ? capture.speciesId : latest.speciesId
 }
 
-// Stands for "an event recorded now" in allowedEventTypes. Only its position matters (last);
-// it is not a UUID, so it cannot collide with a real event id.
+/**
+ * Whether any IDENTIFIED in site.events points to this capture. site.events holds only
+ * non-voided events (pending included; a pending void already hides its event, P2).
+ * The Site screen offers "Identificar espécie" only when this is false (decision N1-b of
+ * slice F3-3b): changing a species is voiding the identification, then identifying again.
+ */
+export function isIdentified(site: BaitSiteView, capture: EventView): boolean {
+  return site.events.some((event) => event.type === 'IDENTIFIED' && event.identifiedEventId === capture.id)
+}
+
+// Stands for "an event recorded now" in recordableEventTypes. Only its position matters
+// (last); it is not a UUID, so it cannot collide with a real event id.
 const SIMULATED_ID = 'simulated-new-event'
 
 /**
- * Event types that would be valid if recorded now (appended at the end of site.events), in
- * BAIT_SITE_EVENT_TYPES order. IDENTIFIED only when identificationTarget is not null.
- * Empty when site.replay is invalid.
+ * Every event type the type buttons may record. IDENTIFIED is not one: it is recorded from a
+ * capture row, for that capture (decision L6 of slice F3-3; slice F3-3b).
  */
-export function allowedEventTypes(site: BaitSiteView): readonly BaitSiteEventType[] {
-  if (!site.replay.valid) return []
-  const target = identificationTarget(site)
-  return BAIT_SITE_EVENT_TYPES.filter((type) => {
-    if (type === 'IDENTIFIED' && target === null) return false
-    const simulated: ReplayEvent = {
-      id: SIMULATED_ID,
-      type,
-      identifiedEventId: type === 'IDENTIFIED' && target !== null ? target.id : null,
-    }
-    return replay([...site.events, simulated]).valid
-  })
-}
-
-/** Every event type the type buttons may record. IDENTIFIED is an action on a capture row (slice F3-3b). */
 export type RecordableType = Exclude<BaitSiteEventType, 'IDENTIFIED'>
 
 function isRecordable(type: BaitSiteEventType): type is RecordableType {
   return type !== 'IDENTIFIED'
 }
 
-/** allowedEventTypes without IDENTIFIED: what the type buttons offer (decision L6 of slice F3-3). */
+/**
+ * What the type buttons offer (decision L6 of slice F3-3): the types of BAIT_SITE_EVENT_TYPES
+ * except IDENTIFIED, in that order, each kept when it would be valid if recorded now
+ * (appended at the end of site.events). Empty when site.replay is invalid.
+ */
 export function recordableEventTypes(site: BaitSiteView): readonly RecordableType[] {
-  return allowedEventTypes(site).filter(isRecordable)
+  if (!site.replay.valid) return []
+  return BAIT_SITE_EVENT_TYPES.filter(isRecordable).filter((type) => {
+    const simulated: ReplayEvent = { id: SIMULATED_ID, type, identifiedEventId: null }
+    return replay([...site.events, simulated]).valid
+  })
 }
 
 /**

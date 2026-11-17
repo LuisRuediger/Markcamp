@@ -258,3 +258,58 @@ describe('a result that arrives after the screen closed (decision L7)', () => {
     expect(t.onSaved).not.toHaveBeenCalled()
   })
 })
+
+test('Salvar sends the site as it is at the tap, not as it was when the screen opened (N5)', async () => {
+  const store = createFakeLocalStore()
+  await armedSite(store)
+  const recordEvent = vi.fn<LocalCommands['recordEvent']>(async () => 'queued')
+  render(
+    <RecordEventScreen
+      projectId={P}
+      baitSiteId="s-1"
+      type="INSPECTED"
+      view={createProjectViewCache(store)(P)}
+      commands={{ recordEvent }}
+      onBack={() => {}}
+      onSaved={() => {}}
+    />,
+  )
+  expect(await screen.findByText('Isca 1')).toBeTruthy()
+
+  // A sync brings a new confirmed ACTIVITY (and a new name, the only thing this screen shows
+  // of the site, so the test waits on what is on screen, not on a timer).
+  await act(async () => {
+    await store.replaceProjectSnapshot(P, {
+      baitSites: [{ id: 's-1', projectId: P, name: 'Isca 1 (ipê)', latitude: -27.1, longitude: -49.1, locationAccuracyM: 5, createdAt: '2026-11-03T12:00:00Z' }],
+      events: [
+        {
+          id: 'e-1',
+          projectId: P,
+          baitSiteId: 's-1',
+          type: 'INSTALLED',
+          occurredAt: instant('2026-11-03T10:00:00Z'),
+          speciesId: null,
+          identifiedEventId: null,
+          recordedAt: '2026-11-03T12:00:00Z',
+        },
+        {
+          id: 'e-2',
+          projectId: P,
+          baitSiteId: 's-1',
+          type: 'ACTIVITY',
+          occurredAt: instant('2026-11-04T10:00:00Z'),
+          speciesId: null,
+          identifiedEventId: null,
+          recordedAt: '2026-11-04T12:00:00Z',
+        },
+      ],
+      species: SPECIES,
+    })
+  })
+  expect(await screen.findByText('Isca 1 (ipê)')).toBeTruthy()
+
+  fireEvent.click(screen.getByRole('button', { name: ptBR.sites.save }))
+
+  expect(recordEvent).toHaveBeenCalledOnce()
+  expect(recordEvent.mock.calls[0]?.[1].events.map((event) => event.id)).toEqual(['e-1', 'e-2'])
+})

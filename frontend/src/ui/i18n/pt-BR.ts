@@ -129,5 +129,9 @@ export const ptBR = {
     voidAction: 'Anular',
     confirmVoid: 'Confirmar anulação',
     voidBlocked: 'Anule antes os registros que dependem deste (por exemplo, a identificação desta captura).',
+    identifyAction: 'Identificar espécie',
+    chooseSpecies: 'Escolha a espécie',
+    identifyFailed: 'Não foi possível identificar esta captura agora.',
+    captureOf: (dayMonth: string) => `captura de ${dayMonth}`,
   },
 } as const
