@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore, type ReactNode } from 'react'
+import type { RecordableType } from '../core/baitSiteRules'
 import type { LocalCommands } from '../core/localCommands'
 import type { LocalSession, LocalSessionSnapshot } from '../core/localSession'
 import type { GeolocationPort } from '../core/ports'
@@ -7,7 +8,9 @@ import HomeScreen from './HomeScreen'
 import { ptBR } from './i18n/pt-BR'
 import NewSiteScreen from './NewSiteScreen'
 import ProjectScreen from './ProjectScreen'
+import RecordEventScreen from './RecordEventScreen'
 import SignInScreen from './SignInScreen'
+import SiteScreen from './SiteScreen'
 
 // Never getIdentity: the uid must not reach ui.
 type AppStore = SessionStore & Pick<SessionIdentitySource, 'retryBackendCheck'>
@@ -24,11 +27,13 @@ interface AppProps {
 
 type ReadySnapshot = Extract<LocalSessionSnapshot, { readonly status: 'ready' }>
 
-// Navigation (decision J2 of slice F3): three screens kept in memory, no router.
+// Navigation (decisions J2 of slice F3 and L2 of slice F3-3a): screens kept in memory, no router.
 type Screen =
   | { readonly kind: 'projects' }
   | { readonly kind: 'project'; readonly projectId: string }
   | { readonly kind: 'newSite'; readonly projectId: string; readonly suggestedName: string }
+  | { readonly kind: 'site'; readonly projectId: string; readonly baitSiteId: string }
+  | { readonly kind: 'record'; readonly projectId: string; readonly baitSiteId: string; readonly type: RecordableType }
 
 const PROJECTS: Screen = { kind: 'projects' }
 
@@ -78,6 +83,7 @@ function Ready({ store, local, commands, geolocation, email, snapshot }: ReadyPr
           local={local}
           onBack={() => go(PROJECTS)}
           onNewSite={(suggestedName) => go({ kind: 'newSite', projectId: screen.projectId, suggestedName })}
+          onOpenSite={(baitSiteId) => go({ kind: 'site', projectId: screen.projectId, baitSiteId })}
         />
       )
     case 'newSite': {
@@ -87,6 +93,35 @@ function Ready({ store, local, commands, geolocation, email, snapshot }: ReadyPr
           projectId={screen.projectId}
           suggestedName={screen.suggestedName}
           geolocation={geolocation}
+          commands={commands}
+          onBack={back}
+          onSaved={back}
+        />
+      )
+    }
+    case 'site': {
+      const { projectId, baitSiteId } = screen
+      return (
+        <SiteScreen
+          projectId={projectId}
+          baitSiteId={baitSiteId}
+          view={snapshot.project(projectId)}
+          local={local}
+          commands={commands}
+          onBack={() => go({ kind: 'project', projectId })}
+          onRecord={(type) => go({ kind: 'record', projectId, baitSiteId, type })}
+        />
+      )
+    }
+    case 'record': {
+      const { projectId, baitSiteId } = screen
+      const back = () => go({ kind: 'site', projectId, baitSiteId })
+      return (
+        <RecordEventScreen
+          projectId={projectId}
+          baitSiteId={baitSiteId}
+          type={screen.type}
+          view={snapshot.project(projectId)}
           commands={commands}
           onBack={back}
           onSaved={back}

@@ -1,3 +1,4 @@
+import type { RecordableType } from '../../core/baitSiteRules'
 import type { BaitSiteEventType, BaitSiteStatus } from '../../core/baitSiteStateMachine'
 import type { SignInFailureKind } from '../../core/sessionStore'
 
@@ -105,5 +106,28 @@ export const ptBR = {
     useNow: 'usar agora',
     save: 'Salvar',
     saveFailed: 'Não foi possível salvar no aparelho. Tente de novo',
+    dateOutOfRange: 'A data precisa estar entre 2000 e agora.',
+    loadingSite: 'Carregando ponto…',
+    siteNotFound: 'Ponto não encontrado',
+    recordHeading: 'Registrar',
+    historyHeading: 'Histórico',
+    emptyHistory: 'Nenhum registro',
+    siteBlocked: 'Há um registro deste ponto recusado pelo servidor. Resolva acima antes de registrar outro.',
+    recordTitles: {
+      INSTALLED: 'Registrar instalação',
+      ACTIVITY: 'Registrar atividade',
+      CAPTURED: 'Registrar captura',
+      LOST: 'Registrar perda',
+      COLLECTED: 'Registrar coleta',
+      REMOVED: 'Registrar retirada',
+      INSPECTED: 'Registrar inspeção',
+    } satisfies Record<RecordableType, string>,
+    speciesLabel: 'Espécie',
+    speciesUnknown: 'Ainda não sei',
+    speciesOption: (commonName: string, scientificName: string) => `${commonName} (${scientificName})`,
+    invalidSequence: 'Este registro não é possível nesta data. Confira a data ou anule antes o registro que impede.',
+    voidAction: 'Anular',
+    confirmVoid: 'Confirmar anulação',
+    voidBlocked: 'Anule antes os registros que dependem deste (por exemplo, a identificação desta captura).',
   },
 } as const

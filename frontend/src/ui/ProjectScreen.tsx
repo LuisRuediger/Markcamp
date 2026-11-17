@@ -1,12 +1,11 @@
 import { useSyncExternalStore } from 'react'
-import type { ReplayResult } from '../core/baitSiteStateMachine'
-import { hasPendingChanges, suggestBaitSiteName } from '../core/baitSiteRules'
-import type { BaitSiteRejection, BaitSiteView, ProjectView } from '../core/localMerge'
+import { suggestBaitSiteName } from '../core/baitSiteRules'
+import type { BaitSiteView, ProjectView } from '../core/localMerge'
 import type { LocalSession } from '../core/localSession'
 import type { Observable } from '../core/localStore'
-import { formatDayMonth, formatDayMonthTime } from './dateTime'
 import { ptBR } from './i18n/pt-BR'
 import RejectionActions from './RejectionActions'
+import { rejectionText, siteSummary } from './siteText'
 
 // One project's bait sites (decision K3 of slice F3-2). Reads only the project's merged view;
 // its only writes are local.retry and local.discard. No sync bar: syncing is automatic, and
@@ -19,40 +18,20 @@ interface ProjectScreenProps {
   onBack: () => void
   /** "Isca N", computed from the sites on screen at the tap. */
   onNewSite: (suggestedName: string) => void
+  onOpenSite: (baitSiteId: string) => void
 }
 
-function statusText(replay: ReplayResult): string {
-  // Should not happen (the device checks every event before queueing it), but shown, not hidden.
-  return replay.valid ? ptBR.sites.status[replay.status] : ptBR.sites.invalidHistory
-}
-
-function rejectionText(rejection: BaitSiteRejection): string {
-  const { event } = rejection
-  const described = event === null ? null : ptBR.sites.eventAt(ptBR.sites.eventTypes[event.type], formatDayMonthTime(event.occurredAt))
-  switch (rejection.kind) {
-    case 'createBaitSite':
-      return ptBR.sites.rejectedSite
-    case 'recordEvent':
-      return described === null ? ptBR.sites.rejectedUnknown : ptBR.sites.rejectedRecord(described)
-    case 'voidEvent':
-      return described === null ? ptBR.sites.rejectedUnknown : ptBR.sites.rejectedVoid(described)
-  }
-}
-
-function SiteRow({ site, local }: { site: BaitSiteView; local: ProjectScreenProps['local'] }) {
+function SiteRow({ site, local, onOpen }: { site: BaitSiteView; local: ProjectScreenProps['local']; onOpen: () => void }) {
   const { rejection } = site
-  // site.events is in history order: the last one is the latest.
-  const last = site.events.at(-1)
-  const details = [statusText(site.replay)]
-  if (last !== undefined) details.push(ptBR.sites.since(formatDayMonth(last.occurredAt)))
-  // Not next to a rejection: the rejection says more, like the project row.
-  if (rejection === null && hasPendingChanges(site)) details.push(ptBR.sites.pendingMark)
 
-  // Not a button: the site screen comes in slice F3-3.
+  // Only the name is a button: the row also holds the rejection buttons, and a button inside
+  // a button is invalid HTML.
   return (
     <li>
-      <strong>{site.name}</strong>
-      <span> · {details.join(' · ')}</span>
+      <button type="button" onClick={onOpen}>
+        {site.name}
+      </button>
+      <span> · {siteSummary(site)}</span>
       {rejection !== null && (
         <RejectionActions key={rejection.seq} text={rejectionText(rejection)} seq={rejection.seq} local={local} />
       )}
@@ -60,7 +39,7 @@ function SiteRow({ site, local }: { site: BaitSiteView; local: ProjectScreenProp
   )
 }
 
-function ProjectScreen({ view, local, onBack, onNewSite }: ProjectScreenProps) {
+function ProjectScreen({ view, local, onBack, onNewSite, onOpenSite }: ProjectScreenProps) {
   const snapshot = useSyncExternalStore(view.subscribe, view.getSnapshot)
 
   function renderBody() {
@@ -79,7 +58,7 @@ function ProjectScreen({ view, local, onBack, onNewSite }: ProjectScreenProps) {
               // In the view's order (id = creation order): never sorted here.
               <ul>
                 {baitSites.map((site) => (
-                  <SiteRow key={site.id} site={site} local={local} />
+                  <SiteRow key={site.id} site={site} local={local} onOpen={() => onOpenSite(site.id)} />
                 ))}
               </ul>
             )}

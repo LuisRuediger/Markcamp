@@ -6,6 +6,7 @@ import {
   checkVoid,
   hasPendingChanges,
   identificationTarget,
+  recordableEventTypes,
   suggestBaitSiteName,
 } from './baitSiteRules'
 import { toHistoryInstant, type HistoryInstant } from './historyOrder'
@@ -183,6 +184,32 @@ describe('allowedEventTypes (ADR 0005, "Allowed when the status is")', () => {
 
     expect(invalid.replay.valid).toBe(false)
     expect(allowedEventTypes(invalid)).toEqual([])
+  })
+})
+
+describe('recordableEventTypes', () => {
+  const installed = event('e-1', 'INSTALLED', day(1))
+  const captured = event('e-3', 'CAPTURED', day(3))
+
+  test('a CAPTURED site: allowedEventTypes without IDENTIFIED, in the same order', () => {
+    const site = siteWith([installed, captured])
+    expect(allowedEventTypes(site)).toContain('IDENTIFIED')
+
+    expect(recordableEventTypes(site)).toEqual(allowedEventTypes(site).filter((type) => type !== 'IDENTIFIED'))
+    expect(recordableEventTypes(site)).toEqual(['LOST', 'COLLECTED', 'INSPECTED'])
+  })
+
+  test('an EMPTY site with a capture in an earlier cycle: no IDENTIFIED', () => {
+    const site = siteWith([installed, captured, event('e-4', 'COLLECTED', day(4))])
+    expect(allowedEventTypes(site)).toContain('IDENTIFIED')
+
+    expect(recordableEventTypes(site)).toEqual(['INSTALLED'])
+  })
+
+  test('empty when the history does not replay', () => {
+    const invalid = siteWith([installed, event('e-2', 'LOST', day(2))])
+
+    expect(recordableEventTypes(invalid)).toEqual([])
   })
 })
 

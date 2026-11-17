@@ -98,7 +98,7 @@ export interface GeolocationPort {
   watch(onReading: (reading: GeoReading) => void, onFailure: (failure: GeoFailure) => void): () => void
 }
 
-export type HttpMethod ='GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface TransportRequest {
   readonly method: HttpMethod

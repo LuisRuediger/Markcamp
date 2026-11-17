@@ -40,8 +40,9 @@ function daysInMonth(year: number, month: number): number {
 
 /**
  * Parses an instant into its normalized form, or returns null if it is not a well-formed
- * instant. It does not apply business rules: the accepted window for occurred_at
- * (ADR 0005, rule 2) is checked by the server only.
+ * instant. It does not apply business rules: the accepted window for occurred_at (ADR 0005,
+ * rule 2; the 2000-01-01 floor lives in the backend's OccurredAtValidator) is checked by the
+ * commands before the queue (localCommands.ts, decision L8) and again by the server.
  */
 export function toHistoryInstant(value: string): HistoryInstant | null {
   const match = INSTANT.exec(value)

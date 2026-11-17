@@ -244,6 +244,53 @@ describe('recordEvent', () => {
   })
 })
 
+describe('date window (decision L8 of slice F3-3a)', () => {
+  // NOW is 2026-11-12T15:30:00.123Z.
+  const AT_NOW = instant('2026-11-12T15:30:00.123000Z')
+  const AFTER_NOW = instant('2026-11-12T15:30:00.123001Z')
+  const BEFORE_2000 = instant('1999-12-31T23:59:59.999999Z')
+  const AT_2000 = instant('2000-01-01T00:00:00.000000Z')
+  const armed = () => siteWith(event('e-1', 'INSTALLED', instant('1999-01-01T10:00:00Z')))
+
+  const cases: [string, HistoryInstant | null, 'queued' | 'dateOutOfRange'][] = [
+    ['one microsecond after now', AFTER_NOW, 'dateOutOfRange'],
+    ['exactly now', AT_NOW, 'queued'],
+    ['one microsecond before 2000', BEFORE_2000, 'dateOutOfRange'],
+    ['exactly 2000-01-01', AT_2000, 'queued'],
+    ['null (now)', null, 'queued'],
+  ]
+
+  test.each(cases)('createBaitSite, %s', async (_name, occurredAt, expected) => {
+    const { submit, commands } = setup()
+
+    await expect(
+      commands.createBaitSite({ projectId: P, name: 'Isca 1', latitude: -27.1, longitude: -49.1, locationAccuracyM: 5, occurredAt }),
+    ).resolves.toBe(expected)
+
+    expect(submit).toHaveBeenCalledTimes(expected === 'queued' ? 1 : 0)
+  })
+
+  test.each(cases)('recordEvent, %s', async (_name, occurredAt, expected) => {
+    const { submit, commands } = setup()
+
+    // An INSPECTED on a site armed in 1999: valid in sequence at every date of the cases.
+    await expect(commands.recordEvent(P, armed(), { type: 'INSPECTED', occurredAt })).resolves.toBe(expected)
+
+    expect(submit).toHaveBeenCalledTimes(expected === 'queued' ? 1 : 0)
+  })
+
+  test('recordEvent checks the date before the sequence', async () => {
+    const { submit, commands } = setup()
+    const captured = siteWith(event('e-1', 'INSTALLED', day(1)), event('e-3', 'CAPTURED', day(3)))
+    // ACTIVITY after a CAPTURED is an invalid sequence at any later date.
+    expect(await commands.recordEvent(P, captured, { type: 'ACTIVITY', occurredAt: null })).toBe('invalidSequence')
+
+    await expect(commands.recordEvent(P, captured, { type: 'ACTIVITY', occurredAt: AFTER_NOW })).resolves.toBe('dateOutOfRange')
+
+    expect(submit).not.toHaveBeenCalled()
+  })
+})
+
 describe('voidEvent', () => {
   test('voiding a plain event submits a voidEvent item', async () => {
     const { submit, commands } = setup()

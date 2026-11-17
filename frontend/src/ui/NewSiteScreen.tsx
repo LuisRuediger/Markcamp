@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { betterReading } from '../core/geoReading'
-import type { LocalCommands } from '../core/localCommands'
+import type { DateOutcome, LocalCommands } from '../core/localCommands'
 import type { SubmitOutcome } from '../core/localSession'
 import type { GeoFailure, GeoReading, GeolocationPort } from '../core/ports'
-import { fromLocalInputValue, toLocalInputValue } from './dateTime'
+import { chosenInstant, type DateChoice } from './dateTime'
+import DateTimeField from './DateTimeField'
 import { ptBR } from './i18n/pt-BR'
 
 // A new bait site from the phone's GPS (decision K5 of slice F3-2). The GPS runs only while
@@ -20,9 +21,6 @@ interface NewSiteScreenProps {
   /** The site is in the queue: back to the Project screen. */
   onSaved: () => void
 }
-
-/** The date link: closed (now, at save time) or open with what was typed. */
-type DateChoice = { readonly open: false } | { readonly open: true; readonly max: string; readonly value: string }
 
 function GpsLine({ best, failure }: { best: GeoReading | null; failure: GeoFailure | null }) {
   switch (failure) {
@@ -45,8 +43,19 @@ function NewSiteScreen({ projectId, suggestedName, geolocation, commands, onBack
   const [name, setName] = useState(suggestedName)
   const [date, setDate] = useState<DateChoice>({ open: false })
   const [saving, setSaving] = useState(false)
-  const [saveFailed, setSaveFailed] = useState(false)
+  const [saveFailure, setSaveFailure] = useState<'dateOutOfRange' | 'failed' | null>(null)
   const stopRef = useRef<(() => void) | null>(null)
+  // A save that ends after the screen closed changes nothing (decision L7 of slice F3-3a).
+  // Set inside the effect, not only by useRef(true): StrictMode runs effects twice in
+  // development, and the first cleanup would leave it false for good.
+  const mounted = useRef(false)
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
 
   useEffect(() => {
     const stop = geolocation.watch(
@@ -62,8 +71,8 @@ function NewSiteScreen({ projectId, suggestedName, geolocation, commands, onBack
 
   async function save(reading: GeoReading) {
     setSaving(true)
-    setSaveFailed(false)
-    let outcome: SubmitOutcome | 'failed'
+    setSaveFailure(null)
+    let outcome: SubmitOutcome | DateOutcome | 'failed'
     try {
       outcome = await commands.createBaitSite({
         projectId,
@@ -73,19 +82,28 @@ function NewSiteScreen({ projectId, suggestedName, geolocation, commands, onBack
         longitude: reading.longitude,
         locationAccuracyM: reading.accuracyM,
         // Closed or left empty: null, which is "now" at save time.
-        occurredAt: date.open ? fromLocalInputValue(date.value) : null,
+        occurredAt: chosenInstant(date),
       })
     } catch {
       outcome = 'failed'
     }
-    if (outcome === 'queued') {
-      // Stopped at once, not only on unmount: the GPS is done.
-      stopRef.current?.()
-      onSaved()
-      return
+    // The user left with "Voltar" meanwhile: a late onSaved would pull them back.
+    if (!mounted.current) return
+    switch (outcome) {
+      case 'queued':
+        // Stopped at once, not only on unmount: the GPS is done.
+        stopRef.current?.()
+        onSaved()
+        return
+      // Anything else keeps everything on screen and says so.
+      case 'dateOutOfRange':
+        setSaveFailure('dateOutOfRange')
+        break
+      case 'notReady':
+      case 'failed':
+        setSaveFailure('failed')
+        break
     }
-    // Anything else keeps everything on screen and says so.
-    setSaveFailed(true)
     setSaving(false)
   }
 
@@ -108,34 +126,15 @@ function NewSiteScreen({ projectId, suggestedName, geolocation, commands, onBack
           {/* required only: the name rules belong to the server, and a copy here would drift. */}
           <input required value={name} onChange={(event) => setName(event.target.value)} />
         </label>
-        {date.open ? (
-          <>
-            <label>
-              {ptBR.sites.dateLabel}
-              {/* max = now when it was opened: occurredAt may not be in the future (ADR 0005, rule 2). */}
-              <input
-                type="datetime-local"
-                max={date.max}
-                value={date.value}
-                onChange={(event) => setDate({ ...date, value: event.target.value })}
-              />
-            </label>
-            <button type="button" onClick={() => setDate({ open: false })}>
-              {ptBR.sites.useNow}
-            </button>
-          </>
-        ) : (
-          <button type="button" onClick={() => setDate({ open: true, max: toLocalInputValue(new Date()), value: '' })}>
-            {ptBR.sites.changeDate}
-          </button>
-        )}
+        <DateTimeField value={date} onChange={setDate} />
         {/* No minimum accuracy: under canopy it may never get low. The number is on screen.
             Disabled while saving: a double tap would queue two sites with two ids. */}
         <button type="submit" disabled={best === null || saving}>
           {ptBR.sites.save}
         </button>
       </form>
-      {saveFailed && <p role="alert">{ptBR.sites.saveFailed}</p>}
+      {saveFailure === 'dateOutOfRange' && <p role="alert">{ptBR.sites.dateOutOfRange}</p>}
+      {saveFailure === 'failed' && <p role="alert">{ptBR.sites.saveFailed}</p>}
     </main>
   )
 }

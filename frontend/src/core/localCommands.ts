@@ -19,6 +19,13 @@ import type { IdGenerator } from './ports'
 /** 'invalidSequence': the check on the device refused it and nothing was submitted. */
 export type CommandOutcome = SubmitOutcome | 'invalidSequence'
 
+/** 'dateOutOfRange': occurredAt is before 2000-01-01 or after now on the device clock; nothing was submitted. */
+export type DateOutcome = 'dateOutOfRange'
+
+// The server's lower bound (OccurredAtValidator.EARLIEST), as a HistoryInstant: fixed width,
+// so it compares as plain text.
+const EARLIEST_OCCURRED_AT = '2000-01-01T00:00:00.000000Z'
+
 /** Fields by type, so the compiler refuses a payload the server would reject (RecordBaitSiteEventRequest). */
 export type NewEvent =
   | { readonly type: 'CAPTURED'; readonly speciesId: string | null }
@@ -38,14 +45,20 @@ export interface NewBaitSite {
 export interface LocalCommands {
   /** Generates the project id and submits a createProject item. Rejects if submit rejects. */
   createProject(name: string): Promise<SubmitOutcome>
-  /** New site id + its INSTALLED id; submits one createBaitSite item. A first INSTALLED is always valid. */
-  createBaitSite(site: NewBaitSite): Promise<SubmitOutcome>
-  /** Checks the site's history with the new event in its place; 'invalidSequence' submits nothing. */
+  /**
+   * New site id + its INSTALLED id; submits one createBaitSite item. A first INSTALLED is always
+   * valid in sequence; only its date is checked ('dateOutOfRange' submits nothing).
+   */
+  createBaitSite(site: NewBaitSite): Promise<SubmitOutcome | DateOutcome>
+  /**
+   * Checks the date window first, then the site's history with the new event in its place;
+   * 'dateOutOfRange' or 'invalidSequence' submits nothing.
+   */
   recordEvent(
     projectId: string,
     site: BaitSiteView,
     event: NewEvent & { readonly occurredAt: HistoryInstant | null },
-  ): Promise<CommandOutcome>
+  ): Promise<CommandOutcome | DateOutcome>
   /**
    * Checks the site's history without the event; 'invalidSequence' submits nothing. Rejects
    * when eventId is not in site.events: a programming error, the screen only offers events it shows.
@@ -66,15 +79,31 @@ export function createLocalCommands(
   now: () => Date,
 ): LocalCommands {
   /**
-   * The device clock as a history instant. No date window here: the server checks occurredAt
-   * (ADR 0005, rule 2) and the screens cap the date picker at now. toISOString always gives a
-   * valid instant for a real clock; if it did not, failing beats a silent fallback date.
+   * The device clock as a history instant. toISOString always gives a valid instant for a real
+   * clock; if it did not, failing beats a silent fallback date.
    */
-  function occurredAtOrNow(occurredAt: HistoryInstant | null): HistoryInstant {
-    if (occurredAt !== null) return occurredAt
+  function nowInstant(): HistoryInstant {
     const instant = toHistoryInstant(now().toISOString())
     if (instant === null) throw new Error('The device clock gave an instant that cannot be recorded.')
     return instant
+  }
+
+  /** null = now, at the moment of the command. */
+  function occurredAtOrNow(occurredAt: HistoryInstant | null): HistoryInstant {
+    return occurredAt ?? nowInstant()
+  }
+
+  /**
+   * The server's date window (ADR 0005, rule 2; OccurredAtValidator), checked on the device
+   * before anything is queued (decision L8 of slice F3-3a). The screens set max on the date
+   * picker, but the iOS picker ignores it: without this check a future date would come back
+   * rejected at the next sync, maybe days later, with "discard" as the only way out.
+   * No clock tolerance here: the picker has minute precision and is never meant to reach past
+   * now. null (now) is always inside. Compared as text: both sides are fixed-width instants.
+   */
+  function inDateWindow(occurredAt: HistoryInstant | null): boolean {
+    if (occurredAt === null) return true
+    return occurredAt >= EARLIEST_OCCURRED_AT && occurredAt <= nowInstant()
   }
 
   return {
@@ -85,6 +114,7 @@ export function createLocalCommands(
 
     // async: a throw (the clock) becomes a rejection, like every other failure of a command.
     async createBaitSite(site) {
+      if (!inDateWindow(site.occurredAt)) return 'dateOutOfRange'
       // The site's id first, then its INSTALLED's.
       const baitSiteId = ids.newId()
       const installationId = ids.newId()
@@ -102,7 +132,10 @@ export function createLocalCommands(
     },
 
     async recordEvent(projectId, site, event) {
-      // Born before the check: with the same occurredAt, the id decides the event's place.
+      // The date first: a future date is refused for what it is, even when the sequence would
+      // also be refused, so the screen names the real problem.
+      if (!inDateWindow(event.occurredAt)) return 'dateOutOfRange'
+      // Born before the sequence check: with the same occurredAt, the id decides the event's place.
       const eventId = ids.newId()
       const occurredAt = occurredAtOrNow(event.occurredAt)
       const { speciesId, identifiedEventId } = typedFields(event)

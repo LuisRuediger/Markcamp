@@ -68,6 +68,18 @@ export function allowedEventTypes(site: BaitSiteView): readonly BaitSiteEventTyp
   })
 }
 
+/** Every event type the type buttons may record. IDENTIFIED is an action on a capture row (slice F3-3b). */
+export type RecordableType = Exclude<BaitSiteEventType, 'IDENTIFIED'>
+
+function isRecordable(type: BaitSiteEventType): type is RecordableType {
+  return type !== 'IDENTIFIED'
+}
+
+/** allowedEventTypes without IDENTIFIED: what the type buttons offer (decision L6 of slice F3-3). */
+export function recordableEventTypes(site: BaitSiteView): readonly RecordableType[] {
+  return allowedEventTypes(site).filter(isRecordable)
+}
+
 /**
  * Whether the site's history stays valid with this event in its place by history order
  * (occurredAt, then id), not at the end. An event dated in the past may land in the middle,

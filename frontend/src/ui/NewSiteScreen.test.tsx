@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 import { toHistoryInstant } from '../core/historyOrder'
 import type { LocalCommands } from '../core/localCommands'
 import type { SubmitOutcome } from '../core/localSession'
@@ -223,6 +223,54 @@ describe('Salvar', () => {
     expect((await screen.findByRole('alert')).textContent).toBe(ptBR.sites.saveFailed)
     expect(t.onSaved).not.toHaveBeenCalled()
     expect(t.name().value).toBe('Isca 3')
+  })
+})
+
+test("'dateOutOfRange' shows its alert and stays, with the name kept", async () => {
+  const t = setup()
+  t.emit(reading(8))
+  t.createBaitSite.mockResolvedValue('dateOutOfRange')
+  fireEvent.change(t.name(), { target: { value: 'Ipê' } })
+
+  fireEvent.click(t.save())
+
+  expect((await screen.findByRole('alert')).textContent).toBe(ptBR.sites.dateOutOfRange)
+  expect(t.onSaved).not.toHaveBeenCalled()
+  expect(t.name().value).toBe('Ipê')
+  await waitFor(() => expect(t.save().disabled).toBe(false))
+})
+
+describe('a result that arrives after the screen closed (decision L7)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  function savedThenClosed() {
+    const t = setup()
+    t.emit(reading(8))
+    let finish: (outcome: SubmitOutcome) => void = () => {}
+    t.createBaitSite.mockReturnValue(new Promise((resolve) => (finish = resolve)))
+    fireEvent.click(t.save())
+    t.unmount()
+    return { ...t, finish }
+  }
+
+  test("'queued': onSaved is not called", async () => {
+    const t = savedThenClosed()
+
+    await act(async () => t.finish('queued'))
+
+    expect(t.onSaved).not.toHaveBeenCalled()
+  })
+
+  test("'notReady': no alert and no React warning", async () => {
+    const consoleError = vi.spyOn(console, 'error')
+    const t = savedThenClosed()
+
+    await act(async () => t.finish('notReady'))
+
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(consoleError).not.toHaveBeenCalled()
   })
 })
 

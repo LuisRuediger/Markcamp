@@ -26,6 +26,7 @@ label {
 
 /* 16px avoids the zoom iOS applies when focusing a smaller input. */
 input,
+select,
 button {
   min-height: 2.75rem;
   font: inherit;
@@ -40,6 +41,37 @@ input {
 main > button,
 form > button {
   width: 100%;
+}
+
+/* "alterar data e hora", "usar agora": a link in looks, still a finger-sized target. The class
+   outranks "form > button"; align-self keeps the form's flex column from stretching it. */
+.link-button {
+  width: auto;
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #0645ad;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.record-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.history {
+  padding-left: 1.25rem;
+}
+
+.history li {
+  margin-bottom: 0.75rem;
+}
+
+.history button {
+  margin: 0.25rem 0.5rem 0 0;
 }
 
 .install-banner {

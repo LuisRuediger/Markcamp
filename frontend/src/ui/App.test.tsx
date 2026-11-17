@@ -190,6 +190,83 @@ describe('navigation', () => {
     expect(await screen.findByText(ptBR.projects.empty)).toBeTruthy()
   })
 
+  describe('Site and Record screens (decision L2 of slice F3-3a)', () => {
+    const siteHeading = () => screen.queryByRole('heading', { name: 'Isca 1' })
+    const recordHeading = () => screen.queryByRole('heading', { name: 'Registrar inspeção' })
+
+    async function openSite() {
+      await openProject()
+      fireEvent.click(screen.getByRole('button', { name: 'Isca 1' }))
+      await screen.findByRole('heading', { name: 'Isca 1' })
+    }
+
+    test('a site name opens the Site screen; a type button opens Record; Voltar twice goes back to the Project screen', async () => {
+      await renderReady()
+
+      await openSite()
+      expect(projectHeading()).toBeNull()
+
+      fireEvent.click(screen.getByRole('button', { name: ptBR.sites.eventTypes.INSPECTED }))
+      expect(recordHeading()).toBeTruthy()
+      expect(siteHeading()).toBeNull()
+
+      back()
+      expect(await screen.findByRole('heading', { name: 'Isca 1' })).toBeTruthy()
+      expect(recordHeading()).toBeNull()
+
+      back()
+      expect(projectHeading()).toBeTruthy()
+      expect(siteHeading()).toBeNull()
+    })
+
+    test("'queued' on Record goes back to the Site screen", async () => {
+      const { local } = await renderReady()
+      await openSite()
+      fireEvent.click(screen.getByRole('button', { name: ptBR.sites.eventTypes.INSPECTED }))
+      await screen.findByRole('heading', { name: 'Registrar inspeção' })
+
+      fireEvent.click(screen.getByRole('button', { name: ptBR.sites.save }))
+
+      expect(await screen.findByRole('heading', { name: 'Isca 1' })).toBeTruthy()
+      expect(recordHeading()).toBeNull()
+      expect(local.submit).toHaveBeenCalledOnce()
+      expect(local.submit.mock.calls[0]?.[0]).toMatchObject({ kind: 'recordEvent', baitSiteId: 's-1', type: 'INSPECTED' })
+    })
+
+    test('a new ready snapshot starts at Projects, even from the Site screen', async () => {
+      const { local } = await renderReady()
+      await openSite()
+
+      const next = createReadyLocalSession()
+      const nextSnapshot = next.local.getSnapshot()
+      act(() => {
+        local.setSnapshot({ status: 'none' })
+        local.setSnapshot(nextSnapshot)
+      })
+
+      expect(projectsHeading()).toBeTruthy()
+      expect(siteHeading()).toBeNull()
+      expect(await screen.findByText(ptBR.projects.empty)).toBeTruthy()
+    })
+
+    test('no sync bar and no Sair on Site or Record', async () => {
+      await renderReady()
+      const anyShown = () =>
+        [
+          screen.queryByRole('button', { name: ptBR.sync.syncNow }),
+          screen.queryByRole('status'),
+          screen.queryByRole('button', { name: ptBR.home.signOut }),
+        ].some((element) => element !== null)
+
+      await openSite()
+      expect(anyShown()).toBe(false)
+
+      fireEvent.click(screen.getByRole('button', { name: ptBR.sites.eventTypes.INSPECTED }))
+      expect(recordHeading()).toBeTruthy()
+      expect(anyShown()).toBe(false)
+    })
+  })
+
   test('the sync bar and Sair are on Projects only', async () => {
     const { geo } = await renderReady()
     const syncBarShown = () => screen.queryByRole('button', { name: ptBR.sync.syncNow }) !== null

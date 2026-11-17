@@ -25,6 +25,14 @@ export function fromLocalInputValue(value: string): HistoryInstant | null {
   return toHistoryInstant(date.toISOString())
 }
 
+/** The date link of a form: closed (now, at save time) or open with what was typed. */
+export type DateChoice = { readonly open: false } | { readonly open: true; readonly max: string; readonly value: string }
+
+/** What a command gets: null (now) when closed, or open but empty or not a valid value. */
+export function chosenInstant(choice: DateChoice): HistoryInstant | null {
+  return choice.open ? fromLocalInputValue(choice.value) : null
+}
+
 /**
  * A history instant as a Date. Cut to milliseconds first: `YYYY-MM-DDTHH:MM:SS.mmmZ` is the
  * one format every engine must parse; six fraction digits are not.

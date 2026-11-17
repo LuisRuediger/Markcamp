@@ -61,7 +61,9 @@ async function setup(prepare: (store: LocalStore) => Promise<void> = async () =>
   const session = createFakeLocalSession()
   const onBack = vi.fn<() => void>()
   const onNewSite = vi.fn<(suggestedName: string) => void>()
-  render(<ProjectScreen view={createProjectViewCache(store)(P)} local={session} onBack={onBack} onNewSite={onNewSite} />)
+  render(
+    <ProjectScreen view={createProjectViewCache(store)(P)} local={session} onBack={onBack} onNewSite={onNewSite} onOpenSite={() => {}} />,
+  )
   return { local: session, onBack, onNewSite }
 }
 
