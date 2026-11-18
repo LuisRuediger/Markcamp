@@ -143,6 +143,21 @@ describe('the site', () => {
     expect(screen.queryByRole('list')).toBeNull()
   })
 
+  test("the status line starts with the site's status mark", async () => {
+    await setup((store) => confirmedSite(store, CAPTURED_HISTORY))
+
+    const line = await screen.findByText('Capturada · desde 10/11')
+    expect(line.firstElementChild?.classList.contains('status-mark')).toBe(true)
+    expect(line.firstElementChild?.classList.contains('status-mark--captured')).toBe(true)
+  })
+
+  test('an invalid history: no status mark, still "Histórico inválido"', async () => {
+    await setup((store) => confirmedSite(store, [event('e-1', 'INSTALLED', local(11, 3)), event('e-2', 'LOST', local(11, 4))]))
+
+    expect(await screen.findByText('Histórico inválido · desde 04/11')).toBeTruthy()
+    expect(document.querySelector('.status-mark')).toBeNull()
+  })
+
   test('an unknown site: "Ponto não encontrado", Voltar, nothing else', async () => {
     const { onBack } = await setup((store) => confirmedSite(store, CAPTURED_HISTORY), { baitSiteId: 's-9' })
 

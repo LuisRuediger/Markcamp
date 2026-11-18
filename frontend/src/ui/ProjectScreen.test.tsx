@@ -128,6 +128,19 @@ test('a confirmed site with only a pending event shows the pending mark', async 
   expect((await row('Isca 1')).textContent).toBe('Isca 1 · Com atividade · desde 05/11 · aguardando envio')
 })
 
+test("a row shows its site's status mark beside the name button, not in it", async () => {
+  await setup(async (store) => {
+    await confirmedProject(store, [site('s-1', 'Isca 1')], [event('e-1', 's-1', 'INSTALLED', local(11, 3))])
+  })
+
+  const item = await row('Isca 1')
+  const mark = item.querySelector('.status-mark')
+  expect(mark?.classList.contains('status-mark--armed')).toBe(true)
+  const button = within(item).getByRole('button', { name: 'Isca 1' })
+  expect(button.contains(mark)).toBe(false)
+  expect(mark?.parentElement).toBe(item)
+})
+
 describe('rejected site', () => {
   test('createBaitSite: its text and no pending mark', async () => {
     await setup(async (store) => {

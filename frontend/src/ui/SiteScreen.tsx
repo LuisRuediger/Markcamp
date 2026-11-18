@@ -8,6 +8,7 @@ import { ptBR } from './i18n/pt-BR'
 import IdentifyActions from './IdentifyActions'
 import RejectionActions from './RejectionActions'
 import { eventSummary, rejectionText, siteSummary } from './siteText'
+import StatusMark from './StatusMark'
 import VoidActions from './VoidActions'
 
 // One bait site (decision L3 of slice F3-3a): its status, its rejected item, one button per
@@ -58,7 +59,10 @@ function SiteScreen({ projectId, baitSiteId, view, local, commands, onBack, onRe
         return (
           <>
             <h1>{site.name}</h1>
-            <p>{siteSummary(site)}</p>
+            <p>
+              <StatusMark replay={site.replay} />
+              {siteSummary(site)}
+            </p>
             {site.rejection !== null && (
               <RejectionActions
                 key={site.rejection.seq}

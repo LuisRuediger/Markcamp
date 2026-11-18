@@ -6,6 +6,7 @@ import type { Observable } from '../core/localStore'
 import { ptBR } from './i18n/pt-BR'
 import RejectionActions from './RejectionActions'
 import { rejectionText, siteSummary } from './siteText'
+import StatusMark from './StatusMark'
 
 // One project's bait sites (decision K3 of slice F3-2). Reads only the project's merged view;
 // its only writes are local.retry and local.discard. No sync bar: syncing is automatic, and
@@ -25,9 +26,11 @@ function SiteRow({ site, local, onOpen }: { site: BaitSiteView; local: ProjectSc
   const { rejection } = site
 
   // Only the name is a button: the row also holds the rejection buttons, and a button inside
-  // a button is invalid HTML.
+  // a button is invalid HTML. The mark is beside the button, not in it, so the button's
+  // accessible name stays the site's name.
   return (
     <li>
+      <StatusMark replay={site.replay} />
       <button type="button" onClick={onOpen}>
         {site.name}
       </button>

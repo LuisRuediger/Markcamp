@@ -31,8 +31,10 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        // App shell only: the default js/css/html glob plus the manifest and its icons.
-        // No runtimeCaching on purpose: API responses are never cached.
+        // App shell only: the default js/css/html glob plus the bundled font (woff2), and
+        // the manifest and its icons. No runtimeCaching on purpose: API responses are never
+        // cached.
+        globPatterns: ['**/*.{js,css,html,woff2}'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
       },
