@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-11-07
 - **Deciders:** Luis
+- **Amended:** 2026-11-24 (map session: tile provider, map tiles cached as the user views them, satellite online only, compass without map rotation, Leaflet without a React wrapper)
 
 ## Context
 
@@ -83,8 +84,12 @@ Constraints:
    `shared/bait-site-state-machine-cases.json` (already decided in the events slice).
    No server-state cache library (TanStack Query) and no global store (Redux): the
    local database is the state.
-4. **The service worker precaches the app shell only** (HTML, JS, CSS, icons). It
-   never caches API responses. Domain data lives in exactly one place on the device.
+4. **The service worker precaches the app shell only** (HTML, JS, CSS, fonts, icons).
+   It never caches API responses. Domain data lives in exactly one place on the device.
+   *Amendment (map session):* one runtime cache exists, for **map tile images from the
+   configured street/terrain tile provider only**, filled as the user views the map
+   (see decision 10). Tiles are a background picture, not domain data, so the
+   "one place" rule is untouched.
 5. **The code is split into three layers, enforced by tooling:**
    - `src/core/` — pure TypeScript: domain rules, state machine, sync logic, types,
      and the interfaces (ports) for storage, transport and auth. It is compiled with
@@ -116,11 +121,27 @@ Constraints:
    frontend build.** It identifies the project and is not a secret; it is protected by
    restricting the key by HTTP referrer in Google Cloud and by Firebase's authorized
    domains. It never goes into the backend `.env`.
-10. **The map uses Leaflet.** Tiles from the public OpenStreetMap servers are never
-    bulk-downloaded or prefetched for offline use (their usage policy forbids it); the
-    tile provider, satellite imagery and the React wrapper are decided in the map
-    slice. **The bait site list, sorted by distance from the current GPS position,
-    must work without the map**, because offline the map may have no background.
+10. **The map uses Leaflet, north up, driven directly from React** (one component owns
+    the map instance; no React wrapper such as react-leaflet). The map never rotates;
+    the compass is a control that turns with the device and marks east (bait entrances
+    face sunrise), so Leaflet needs no rotation plugin. *Amendment (map session):*
+    - **Street/terrain layer: Thunderforest "Landscape"** (free plan, API key in the
+      frontend build, not a secret). Its terms allow keeping tiles on the device for
+      offline use, beyond their HTTP expiry; they forbid pre-downloading an area on the
+      free plan. So tiles are cached **only as the user views them**; there is no
+      "download this area" feature. Preparing a route = viewing it once with a
+      connection.
+    - **Satellite layer: Esri World Imagery, online only, during the testing phase**
+      (non-commercial use, free ArcGIS account). Its tiles are never cached. It must be
+      replaced before the app is sold.
+    - Tiles from the public OpenStreetMap servers are never used for offline (their
+      usage policy forbids offline use and prefetching).
+    - Attribution required by each provider is always visible on the map.
+    - **The bait site list, sorted by distance from the current GPS position, must work
+      without the map**, because offline the map may have no background for areas
+      never viewed.
+    Revisit when the app is sold (both providers' plans and terms), or when "download
+    this area" is needed (paid plan, or self-hosted OpenStreetMap vector tiles).
 11. **The app requests persistent storage** (`navigator.storage.persist()`) and
     encourages installation to the home screen, because the outbox is the one thing
     that must not disappear.
@@ -147,6 +168,11 @@ Constraints:
   sync session, the first slices are online-only.
 - Fewer built-ins than Angular: each extra need (routing, forms) is a dependency to
   justify.
+- Offline, the map has a background only where the user has looked before, at the
+  zoom levels looked at. Areas never viewed show markers and position on a blank
+  background.
+- Both tile providers are chosen for the testing phase; selling the app means
+  revisiting their plans and terms.
 
 ## Derived rules (non-negotiable)
 
@@ -156,7 +182,9 @@ Constraints:
    TypeScript configuration has no DOM library.
 3. `src/ui/` never imports from `src/adapters/`; `src/main.tsx` is the only place that
    wires them.
-4. The service worker has no runtime caching rule for `/api`.
+4. The service worker has no runtime caching rule for `/api`. Its only runtime cache
+   is for tile images of the street/terrain provider's host (cache first, entry limit,
+   purged on quota error); no other host is cached at runtime.
 5. The bearer token is attached only to the configured API base URL.
 6. Outbox entries carry their owner; only the signed-in owner's entries are sent.
 7. No CORS configuration in the backend until a deployment needs a second origin, and
@@ -165,3 +193,8 @@ Constraints:
    orders by `(occurred_at, id)` with the same comparison as the server (UUIDs as
    unsigned bytes, i.e. their canonical lowercase string), and the shared cases file
    is the contract.
+9. Map tiles are never fetched ahead of what the user is viewing (no prefetch, no
+   bulk download), whatever the provider.
+10. Satellite tiles are never stored on the device.
+11. The bearer token never goes to a tile host (rule 5 already covers it: tiles are
+    requested by Leaflet, never through the API client).

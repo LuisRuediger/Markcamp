@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import type { BaitSiteEventType } from '../core/baitSiteStateMachine'
 import { createFakeLocalStore } from '../core/fakeLocalStore'
 import { toHistoryInstant, type HistoryInstant } from '../core/historyOrder'
@@ -59,12 +59,8 @@ async function setup(prepare: (store: LocalStore) => Promise<void> = async () =>
   const store = createFakeLocalStore()
   await prepare(store)
   const session = createFakeLocalSession()
-  const onBack = vi.fn<() => void>()
-  const onNewSite = vi.fn<(suggestedName: string) => void>()
-  render(
-    <ProjectScreen view={createProjectViewCache(store)(P)} local={session} onBack={onBack} onNewSite={onNewSite} onOpenSite={() => {}} />,
-  )
-  return { local: session, onBack, onNewSite }
+  render(<ProjectScreen view={createProjectViewCache(store)(P)} local={session} onOpenSite={() => {}} />)
+  return { local: session }
 }
 
 async function row(name: string): Promise<HTMLElement> {
@@ -216,14 +212,12 @@ describe('rejected site', () => {
   })
 })
 
-test('a project that is gone: "Projeto não encontrado", Voltar, nothing else', async () => {
-  const { onBack } = await setup()
+test('a project that is gone: "Projeto não encontrado", nothing else', async () => {
+  await setup()
 
   expect(await screen.findByRole('heading', { name: ptBR.sites.projectNotFound })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: ptBR.sites.newSite })).toBeNull()
   expect(screen.queryByText(ptBR.sites.empty)).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: ptBR.nav.back }))
-  expect(onBack).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('button')).toBeNull()
 })
 
 test('an empty project: "Nenhum ponto ainda" and no list', async () => {
@@ -233,34 +227,32 @@ test('an empty project: "Nenhum ponto ainda" and no list', async () => {
   expect(screen.queryByRole('list')).toBeNull()
 })
 
-describe('Novo ponto', () => {
-  test('opens New site with the suggested name, computed from the sites on screen', async () => {
-    const { onNewSite } = await setup(async (store) => {
+// "Voltar" and "Novo ponto" moved to the bottom bar (decision R7 of slice F4-1): BottomNav.test.tsx.
+describe('no Voltar and no Novo ponto', () => {
+  test('a project with sites: neither button', async () => {
+    await setup(async (store) => {
       await confirmedProject(store, [site('s-1', 'Isca 1')], [event('e-1', 's-1', 'INSTALLED', local(11, 3))])
-      await store.enqueue(createSite('s-2', 'Isca 2', local(11, 4)))
     })
-    await screen.findByText('Isca 2')
+    await screen.findByText('Isca 1')
 
-    fireEvent.click(screen.getByRole('button', { name: ptBR.sites.newSite }))
-
-    expect(onNewSite).toHaveBeenCalledExactlyOnceWith('Isca 3')
+    expect(screen.queryByRole('button', { name: ptBR.nav.back })).toBeNull()
+    expect(screen.queryByRole('button', { name: ptBR.sites.newSite })).toBeNull()
   })
 
-  test('hidden in a rejected project, with the text that says why', async () => {
+  test('a rejected project: the text that says why', async () => {
     await setup(async (store) => {
       await rejected(store, { kind: 'createProject', projectId: P, name: 'Recusado' })
     })
 
     expect(await screen.findByText(ptBR.sites.projectRejected)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: ptBR.sites.newSite })).toBeNull()
   })
 
-  test('shown in a project that is only pending', async () => {
+  test('a project that is only pending: no rejected text', async () => {
     await setup(async (store) => {
       await store.enqueue({ kind: 'createProject', projectId: P, name: 'Offline' })
     })
 
-    expect(await screen.findByRole('button', { name: ptBR.sites.newSite })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Offline' })).toBeTruthy()
     expect(screen.queryByText(ptBR.sites.projectRejected)).toBeNull()
   })
 })

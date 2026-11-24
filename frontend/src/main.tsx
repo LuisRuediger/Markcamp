@@ -13,7 +13,7 @@ import { createFirebaseAuth } from './adapters/firebaseAuth'
 import { createStoragePersistence } from './adapters/storagePersistence'
 import { createUuidV7Generator } from './adapters/uuidV7Generator'
 import { createApiClient } from './core/apiClient'
-import { parseFirebaseConfig } from './core/config'
+import { parseFirebaseConfig, parseMapConfig } from './core/config'
 import { createLocalCommands } from './core/localCommands'
 import { createLocalSession } from './core/localSession'
 import { createSessionStore } from './core/sessionStore'
@@ -33,8 +33,12 @@ const firebaseConfig = parseFirebaseConfig({
   VITE_FIREBASE_PROJECT_ID: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   VITE_FIREBASE_APP_ID: import.meta.env.VITE_FIREBASE_APP_ID,
 })
+const mapConfig = parseMapConfig({
+  VITE_THUNDERFOREST_API_KEY: import.meta.env.VITE_THUNDERFOREST_API_KEY,
+})
 
-if (firebaseConfig.ok) {
+// Both or nothing: the app never starts half-configured.
+if (firebaseConfig.ok && mapConfig.ok) {
   const auth = createFirebaseAuth(firebaseConfig.config)
   const api = createApiClient(auth, createFetchTransport(API_BASE))
   const logger = createConsoleLogger()
@@ -60,13 +64,22 @@ if (firebaseConfig.ok) {
 
   root.render(
     <StrictMode>
-      <App store={store} local={local} commands={commands} installed={installed} geolocation={geolocation} />
+      <App
+        store={store}
+        local={local}
+        commands={commands}
+        installed={installed}
+        geolocation={geolocation}
+        tileApiKey={mapConfig.config.tileApiKey}
+      />
     </StrictMode>,
   )
 } else {
+  // Every missing variable at once, Firebase's and the map's.
+  const missing = [...(firebaseConfig.ok ? [] : firebaseConfig.missing), ...(mapConfig.ok ? [] : mapConfig.missing)]
   root.render(
     <StrictMode>
-      <ConfigErrorScreen missing={firebaseConfig.missing} />
+      <ConfigErrorScreen missing={missing} />
     </StrictMode>,
   )
 }

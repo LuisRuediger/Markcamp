@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest'
-import { parseFirebaseConfig } from './config'
+import { describe, expect, test } from 'vitest'
+import { parseFirebaseConfig, parseMapConfig } from './config'
 
 test('all variables present gives the config', () => {
   const result = parseFirebaseConfig({
@@ -26,5 +26,25 @@ test('one missing and one blank are both listed by name', () => {
   expect(result).toEqual({
     ok: false,
     missing: ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_AUTH_DOMAIN'],
+  })
+})
+
+describe('parseMapConfig', () => {
+  test.each([
+    ['absent', undefined],
+    ['blank', ''],
+    ['only spaces', '   '],
+  ])('%s key is listed by name', (_name, value) => {
+    expect(parseMapConfig({ VITE_THUNDERFOREST_API_KEY: value })).toEqual({
+      ok: false,
+      missing: ['VITE_THUNDERFOREST_API_KEY'],
+    })
+  })
+
+  test('a key gives the config, trimmed', () => {
+    expect(parseMapConfig({ VITE_THUNDERFOREST_API_KEY: '  abc123 ' })).toEqual({
+      ok: true,
+      config: { tileApiKey: 'abc123' },
+    })
   })
 })

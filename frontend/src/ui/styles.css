@@ -29,6 +29,8 @@
   --color-muted: #6B7280;
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --touch-min: 48px;
+  /* The bottom bar, without the iPhone's home indicator area (added where it is used). */
+  --bottom-nav-height: 64px;
 }
 
 body {
@@ -42,6 +44,8 @@ main {
   max-width: 24rem;
   margin: 0 auto;
   padding: 1rem;
+  /* viewport-fit=cover: on the iPhone the page starts under the status bar. */
+  padding-top: calc(1rem + env(safe-area-inset-top));
 }
 
 form {
@@ -156,4 +160,226 @@ form > button {
 
 .status-mark--lost {
   background: var(--color-muted);
+}
+
+/* The bottom bar (decision R7 of slice F4-1): fixed, above the home indicator. The screens
+   that have it get its height as bottom padding, so their last row is not hidden under it. */
+.with-bottom-nav {
+  padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  box-sizing: border-box;
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.bottom-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 100%;
+  min-height: var(--touch-min);
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bottom-nav__item[aria-current='page'] {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.bottom-nav__item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.bottom-nav__center {
+  display: flex;
+  justify-content: center;
+}
+
+/* The + raised above the bar. */
+.bottom-nav__plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-top: -28px;
+  padding: 0;
+  border: 4px solid #fff;
+  border-radius: 50%;
+  background: var(--color-honey);
+  color: var(--color-on-honey);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.bottom-nav__plus:disabled {
+  background: var(--color-border);
+  color: var(--color-text-secondary);
+  box-shadow: none;
+  cursor: default;
+}
+
+/* The map screen (decision M1-c of slice F4-1): the map fills the screen above the bar, the
+   header card floats over it at the top left. */
+main.map-screen {
+  position: relative;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  height: calc(100dvh - var(--bottom-nav-height) - env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+/* z-index 0: Leaflet's panes and controls (z-index up to 1000) stay inside the map, under the
+   header card and the bar. */
+.leaflet-map {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--color-bg);
+}
+
+.map-header {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 12px;
+  /* 76 px free on the right: the compass and the layers button (slices F4-4 and F4-5). */
+  right: 76px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: var(--color-surface);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+}
+
+.map-header__logo {
+  flex: none;
+}
+
+.map-header__text {
+  min-width: 0;
+}
+
+.map-header__title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.map-header__project {
+  margin: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.map-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+  width: calc(100% - 64px);
+  max-width: 20rem;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--color-surface);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  text-align: center;
+  box-sizing: border-box;
+}
+
+/* A marker: the Leaflet icon is the 48 px touch area; the circle inside it is what is seen.
+   Shape, fill and border differ between statuses, not only hue (decision O4 of slice F4-0). */
+.map-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.map-marker:focus-visible {
+  outline: none;
+}
+
+.map-marker:focus-visible .map-marker__dot {
+  outline: 3px solid var(--color-link);
+  outline-offset: 2px;
+}
+
+.map-marker__dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  box-sizing: border-box;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.map-marker--armed .map-marker__dot {
+  background: var(--color-surface);
+  border: 3px solid var(--color-text);
+}
+
+.map-marker--active .map-marker__dot {
+  width: 32px;
+  height: 32px;
+  background: var(--color-honey);
+  border: 3px solid #fff;
+}
+
+.map-marker--captured .map-marker__dot {
+  width: 32px;
+  height: 32px;
+  background: var(--color-captured);
+  border: 3px solid #fff;
+}
+
+/* The dashed line alone disappears on the terrain: a light fill behind it. */
+.map-marker--empty .map-marker__dot {
+  background: rgba(255, 255, 255, 0.85);
+  border: 2.5px dashed var(--color-muted);
+}
+
+.map-marker--lost .map-marker__dot {
+  background: var(--color-muted);
+  border: 3px solid #fff;
+}
+
+.map-marker--invalid .map-marker__dot {
+  background: #fff;
+  border: 3px solid var(--color-alert);
+  color: var(--color-alert);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
 }

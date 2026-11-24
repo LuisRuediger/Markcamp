@@ -62,6 +62,13 @@ export const ptBR = {
   },
   nav: {
     back: 'Voltar',
+    map: 'Mapa',
+    list: 'Lista',
+    projects: 'Projetos',
+  },
+  map: {
+    empty: 'Nenhum ponto ainda. Toque em + para criar o primeiro.',
+    siteCount: (count: number) => (count === 1 ? '1 isca' : `${count} iscas`),
   },
   sites: {
     loading: 'Carregando pontos…',

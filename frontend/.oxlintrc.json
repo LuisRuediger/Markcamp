@@ -134,6 +134,35 @@
             {
               "group": ["fake-indexeddb", "fake-indexeddb/**"],
               "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
+            },
+            {
+              // One component owns the Leaflet map (decision R1 of slice F4-1); every other
+              // screen gets MapMarkers, never Leaflet objects.
+              "group": ["leaflet", "leaflet/**"],
+              "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
+            }
+          ]
+        }]
+      }
+    },
+    {
+      // The one component allowed to import leaflet, and its test. This replaces the rule of
+      // the override above, so the other ui bans are restated.
+      "files": ["src/ui/map/LeafletMap.tsx", "src/ui/map/LeafletMap.test.tsx"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              "group": ["**/adapters", "**/adapters/**"],
+              "message": "ui may not import adapters. Wire them in src/main.tsx (ADR 0007)."
+            },
+            {
+              "group": ["dexie", "dexie/**"],
+              "message": "ui may not import dexie. Read through core's LocalStore port (ADR 0008)."
+            },
+            {
+              "group": ["fake-indexeddb", "fake-indexeddb/**"],
+              "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
             }
           ]
         }]

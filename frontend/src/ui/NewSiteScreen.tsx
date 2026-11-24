@@ -18,7 +18,7 @@ interface NewSiteScreenProps {
   geolocation: GeolocationPort
   commands: Pick<LocalCommands, 'createBaitSite'>
   onBack: () => void
-  /** The site is in the queue: back to the Project screen. */
+  /** The site is in the queue: back to the screen where + was tapped. */
   onSaved: () => void
 }
 

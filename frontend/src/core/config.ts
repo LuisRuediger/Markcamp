@@ -31,3 +31,22 @@ export function parseFirebaseConfig(env: RawFirebaseEnv): FirebaseConfigResult {
   if (missing.length > 0) return { ok: false, missing }
   return { ok: true, config: { apiKey, authDomain, projectId, appId } }
 }
+
+export interface MapConfig {
+  /** Thunderforest API key: in every tile URL, so not a secret, but never logged. */
+  readonly tileApiKey: string
+}
+
+export interface RawMapEnv {
+  readonly VITE_THUNDERFOREST_API_KEY: string | undefined
+}
+
+export type MapConfigResult =
+  | { readonly ok: true; readonly config: MapConfig }
+  | { readonly ok: false; readonly missing: readonly string[] }
+
+export function parseMapConfig(env: RawMapEnv): MapConfigResult {
+  const tileApiKey = env.VITE_THUNDERFOREST_API_KEY?.trim() ?? ''
+  if (tileApiKey === '') return { ok: false, missing: ['VITE_THUNDERFOREST_API_KEY'] }
+  return { ok: true, config: { tileApiKey } }
+}
