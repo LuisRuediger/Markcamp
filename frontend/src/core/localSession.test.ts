@@ -82,21 +82,27 @@ function createFakeSession() {
 
 type FakeDb = LocalStore & { close: ReturnType<typeof vi.fn<() => void>> }
 
-/** openStore controlled by the test: every call waits until the test resolves or rejects it. */
+/**
+ * openStore controlled by the test: every call waits until the test resolves or rejects it.
+ * Each store is a new fake, with the methods given to override() (or to resolve()) replaced.
+ */
 function createOpener(log: string[]) {
   const calls: {
     readonly userId: string
-    readonly resolve: () => FakeDb
+    readonly resolve: (change?: Partial<LocalStore>) => FakeDb
     readonly reject: (error: unknown) => void
   }[] = []
   let auto = false
+  let overrides: Partial<LocalStore> = {}
 
   function openStore(userId: string): Promise<FakeDb> {
     log.push(`open ${userId}`)
     const pending = deferred<FakeDb>()
-    const resolve = () => {
+    const resolve = (change: Partial<LocalStore> = {}) => {
       const db: FakeDb = {
         ...createFakeLocalStore(),
+        ...overrides,
+        ...change,
         close: vi.fn(() => {
           log.push(`close ${userId}`)
         }),
@@ -116,6 +122,10 @@ function createOpener(log: string[]) {
     /** From now on every open resolves at once. */
     autoResolve() {
       auto = true
+    },
+    /** From now on every new store has these methods replaced. */
+    override(change: Partial<LocalStore>) {
+      overrides = change
     },
   }
 }
@@ -230,6 +240,7 @@ function accountsWith(entries: Record<string, string> = {}) {
 }
 
 const PROJECT: QueuePayload = { kind: 'createProject', projectId: 'project-1', name: 'Sítio' }
+const SECRET_PROJECT = 'project-secret-id'
 
 /** Signed in as A with a known mapping and the database open. */
 async function readyAsA(options: { persist?: PersistOutcome } = {}) {
@@ -673,6 +684,147 @@ describe('writes', () => {
   })
 })
 
+describe('last project (slice F4-2b)', () => {
+  function lastProjectOf(snapshot: LocalSessionSnapshot) {
+    if (snapshot.status !== 'ready') throw new Error('not ready')
+    return snapshot.lastProjectId
+  }
+
+  test('18. lastProjectId starts loading, then is ready with the stored value', async () => {
+    const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
+    t.session.signIn(UID_A)
+    await flush()
+    const held = deferred<string | null>()
+    t.opener.calls[0]!.resolve({ readLastProject: () => held.promise })
+    await flush()
+
+    const lastProjectId = lastProjectOf(t.local.getSnapshot())
+    expect(lastProjectId.getSnapshot()).toEqual({ status: 'loading' })
+    const listener = vi.fn()
+    lastProjectId.subscribe(listener)
+
+    held.resolve('project-1')
+    await flush()
+
+    expect(lastProjectId.getSnapshot()).toEqual({ status: 'ready', value: 'project-1' })
+    expect(listener).toHaveBeenCalledOnce()
+    expect(t.errors).toEqual([])
+  })
+
+  test('18b. read from the store when the session becomes ready; null with nothing stored', async () => {
+    const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
+    t.session.signIn(UID_A)
+    await flush()
+    const db = t.opener.calls[0]!.resolve()
+    void db.writeLastProject('project-1')
+    await flush()
+    expect(lastProjectOf(t.local.getSnapshot()).getSnapshot()).toEqual({ status: 'ready', value: 'project-1' })
+
+    const empty = await readyAsA()
+    await flush()
+    expect(lastProjectOf(empty.local.getSnapshot()).getSnapshot()).toEqual({ status: 'ready', value: null })
+  })
+
+  test('18c. a rejected read: ready with null, and a fixed phrase', async () => {
+    const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
+    t.session.signIn(UID_A)
+    await flush()
+    t.opener.calls[0]!.resolve({
+      readLastProject: async () => {
+        throw new Error('broken')
+      },
+    })
+    await flush()
+
+    expect(lastProjectOf(t.local.getSnapshot()).getSnapshot()).toEqual({ status: 'ready', value: null })
+    expect(t.errors).toEqual(['Local session: reading the last project failed.'])
+  })
+
+  test('18d. a read that rejects after the session ended logs nothing', async () => {
+    const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
+    t.session.signIn(UID_A)
+    await flush()
+    const held = deferred<string | null>()
+    t.opener.calls[0]!.resolve({ readLastProject: () => held.promise })
+    await flush()
+    const lastProjectId = lastProjectOf(t.local.getSnapshot())
+
+    t.session.signOut()
+    held.reject(new Error('broken'))
+    await flush()
+
+    expect(t.errors).toEqual([])
+    expect(lastProjectId.getSnapshot()).toEqual({ status: 'ready', value: null })
+  })
+
+  test('19. rememberProject writes through the live store and requests no sync', async () => {
+    const t = await readyAsA()
+    const { store, requests } = t.engines[0]!
+
+    await t.local.rememberProject('project-1')
+
+    expect(await store.readLastProject()).toBe('project-1')
+    expect(await queueOf(store)).toEqual([])
+    expect(requests).toEqual(['full'])
+    // The start value is not updated: navigation already knows the current project.
+    expect(lastProjectOf(t.local.getSnapshot()).getSnapshot()).toEqual({ status: 'ready', value: null })
+  })
+
+  test('19b. rememberProject is a no-op before ready and after sign-out', async () => {
+    const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
+    await t.local.rememberProject('project-0')
+    t.session.signIn(UID_A)
+    await flush()
+    await t.local.rememberProject('project-1')
+    const db = t.opener.calls[0]!.resolve()
+    await flush()
+    expect(t.status()).toBe('ready')
+    expect(await db.readLastProject()).toBeNull()
+
+    t.session.signOut()
+    await t.local.rememberProject('project-2')
+
+    expect(await db.readLastProject()).toBeNull()
+    expect(t.errors).toEqual([])
+  })
+
+  test('19c. a rejected write resolves and logs a fixed phrase', async () => {
+    const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
+    t.session.signIn(UID_A)
+    await flush()
+    t.opener.calls[0]!.resolve({
+      writeLastProject: async () => {
+        throw new Error('broken')
+      },
+    })
+    await flush()
+
+    await expect(t.local.rememberProject('project-1')).resolves.toBeUndefined()
+
+    expect(t.errors).toEqual(['Local session: remembering the last project failed.'])
+  })
+
+  test('19d. a new session gives a new lastProjectId that reads its own database', async () => {
+    const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
+    t.session.signIn(UID_A)
+    await flush()
+    void t.opener.calls[0]!.resolve().writeLastProject('project-1')
+    await flush()
+    const first = lastProjectOf(t.local.getSnapshot())
+
+    t.session.signOut()
+    t.session.signIn(UID_A)
+    await flush()
+    void t.opener.calls[1]!.resolve().writeLastProject('project-2')
+    await flush()
+
+    const second = lastProjectOf(t.local.getSnapshot())
+    expect(second).not.toBe(first)
+    expect(second.getSnapshot()).toEqual({ status: 'ready', value: 'project-2' })
+    expect(first.getSnapshot()).toEqual({ status: 'ready', value: 'project-1' })
+  })
+})
+
 describe('snapshot', () => {
   test('16. same object between changes; listeners called on each change only; unsubscribe works', async () => {
     const t = setup({ accounts: accountsWith({ [UID_A]: ID_A }) })
@@ -727,23 +879,36 @@ describe('privacy', () => {
     await flush()
 
     // Lookup works, the open works, /me answers with another id, the persist outcome is logged.
+    // Every store fails to read and to write the last project, with the ids in the errors.
     failLookup = false
+    t.opener.override({
+      async readLastProject() {
+        throw new Error(`cannot read markcamp-${ID_A} for ${UID_A}`)
+      },
+      async writeLastProject(projectId) {
+        throw new Error(`cannot write ${projectId} into markcamp-${ID_A2}`)
+      },
+    })
     t.opener.autoResolve()
     t.session.signOut()
     t.session.signIn(UID_A)
     await flush()
     t.session.meOk(ID_A2)
     await flush()
+    await t.local.rememberProject(SECRET_PROJECT)
 
     expect(t.errors).toEqual([
       'Local session: looking up the local account failed.',
       'Local session: remembering the local account failed.',
       'Local session: opening the local database failed.',
+      'Local session: reading the last project failed.',
       'Local session: remembering the local account failed.',
+      'Local session: reading the last project failed.',
+      'Local session: remembering the last project failed.',
     ])
     expect(t.warnings).toHaveLength(1)
     for (const message of [...t.errors, ...t.warnings]) {
-      for (const secret of [UID_A, ID_A, ID_A2]) expect(message).not.toContain(secret)
+      for (const secret of [UID_A, ID_A, ID_A2, SECRET_PROJECT]) expect(message).not.toContain(secret)
     }
   })
 })

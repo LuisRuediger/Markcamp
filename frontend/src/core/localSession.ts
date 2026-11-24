@@ -6,7 +6,7 @@ import {
   type ProjectListEntry,
   type ProjectView,
 } from './localMerge'
-import type { LocalStore, Observable, QueuePayload } from './localStore'
+import { LOADING, type Loadable, type LocalStore, type Observable, type QueuePayload } from './localStore'
 import type { AppLifecycle, Logger, StoragePersistence } from './ports'
 import type { SessionIdentitySource } from './sessionStore'
 import type { SyncEngine } from './syncEngine'
@@ -32,6 +32,12 @@ export type LocalSessionSnapshot =
       readonly pendingCount: Observable<number>
       /** One project's merged view; the same id gives the same object for the whole session. */
       readonly project: (projectId: string) => Observable<ProjectView>
+      /**
+       * The last project stored when this session became ready (slice F4-2b), read once:
+       * the start value, not updated by rememberProject. null when none is stored or the
+       * read failed.
+       */
+      readonly lastProjectId: Observable<string | null>
     }
 
 export type SubmitOutcome = 'queued' | 'notReady'
@@ -46,6 +52,12 @@ export interface LocalSession {
   retry(seq: number): Promise<void>
   /** The user's "discard". No-op when not ready. */
   discard(seq: number): Promise<void>
+  /**
+   * Stores the project the user opened as the last one (slice F4-2b). Not domain data: no
+   * queue item, no sync, never sent to the server. No-op when not ready. Never rejects: a
+   * failure is logged and only makes the next start open at Projects.
+   */
+  rememberProject(projectId: string): Promise<void>
 }
 
 export interface LocalSessionDeps {
@@ -60,6 +72,34 @@ export interface LocalSessionDeps {
 }
 
 type ReadySnapshot = Extract<LocalSessionSnapshot, { readonly status: 'ready' }>
+
+/**
+ * The ready snapshot's lastProjectId: loading until `read` settles, then ready forever (never
+ * back to loading, like the store's observables). A rejected read is ready with null, after
+ * calling onFailure. Exported so the ui test helpers build the same object.
+ */
+export function createLastProjectView(read: Promise<string | null>, onFailure: () => void): Observable<string | null> {
+  let snapshot: Loadable<string | null> = LOADING
+  const listeners = new Set<() => void>()
+  void read
+    .catch(() => {
+      onFailure()
+      return null
+    })
+    .then((value) => {
+      snapshot = { status: 'ready', value }
+      for (const listener of [...listeners]) listener()
+    })
+  return {
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    getSnapshot: () => snapshot,
+  }
+}
 
 // Shared objects: the same status gives the same snapshot (===).
 const NONE: LocalSessionSnapshot = { status: 'none' }
@@ -151,6 +191,10 @@ export function createLocalSession(deps: LocalSessionDeps): LocalSession {
           projects: createProjectsView(store),
           pendingCount: createPendingCountView(store),
           project: createProjectViewCache(store),
+          // Never the error's message (it may carry data), and only for the live session.
+          lastProjectId: createLastProjectView(store.readLastProject(), () => {
+            if (liveRuntime()?.store === store) logger.error('Local session: reading the last project failed.')
+          }),
         }
         run.runtime = { store, snapshot: ready }
         setSnapshot(ready)
@@ -283,6 +327,17 @@ export function createLocalSession(deps: LocalSessionDeps): LocalSession {
       const runtime = liveRuntime()
       if (runtime === null) return
       await runtime.store.discard(seq)
+    },
+
+    async rememberProject(projectId) {
+      const runtime = liveRuntime()
+      if (runtime === null) return
+      try {
+        await runtime.store.writeLastProject(projectId)
+      } catch {
+        // Never the error's message nor the id.
+        logger.error('Local session: remembering the last project failed.')
+      }
     },
   }
 }

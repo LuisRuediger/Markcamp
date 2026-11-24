@@ -609,6 +609,49 @@ export function describeLocalStore(name: string, create: () => Promise<LocalStor
       })
     })
 
+    // P6 (slice F4-2b): a device setting, neither the copy nor the queue.
+    describe('last project', () => {
+      it('is null on an empty store; a write stores it and a second write replaces it', async () => {
+        const store = await create()
+        expect(await store.readLastProject()).toBeNull()
+
+        await store.writeLastProject(P1)
+        expect(await store.readLastProject()).toBe(P1)
+
+        await store.writeLastProject(P2)
+        expect(await store.readLastProject()).toBe(P2)
+      })
+
+      it('writing it adds no queue item and changes no project, site or event', async () => {
+        const store = await create()
+        await store.replaceProjects([project(P1)])
+        await store.replaceProjectSnapshot(P1, { baitSites: [site('s-1', P1)], events: [event('e-1', P1, 's-1')], species: [SPECIES_A] })
+        await store.enqueue(createProject(P2))
+        await store.enqueue(recordEvent(P1, 's-1', 'e-2'))
+        const queueBefore = await store.queuedItems()
+        const projectsBefore = await readProjects(store)
+        const projectBefore = await readProject(store, P1)
+
+        await store.writeLastProject(P1)
+
+        expect(await store.queuedItems()).toStrictEqual(queueBefore)
+        expect(await readProjects(store)).toStrictEqual(projectsBefore)
+        expect(await readProject(store, P1)).toStrictEqual(projectBefore)
+      })
+
+      it('replaceProjects and replaceProjectSnapshot leave it as it was', async () => {
+        const store = await create()
+        await store.replaceProjects([project(P1)])
+        await store.writeLastProject(P1)
+
+        await store.replaceProjects([])
+        expect(await store.readLastProject()).toBe(P1)
+
+        await store.replaceProjectSnapshot(P1, { baitSites: [], events: [], species: [] })
+        expect(await store.readLastProject()).toBe(P1)
+      })
+    })
+
     describe('snapshots', () => {
       it('getSnapshot returns the same object until a write changes it, then a new one', async () => {
         const store = await create()

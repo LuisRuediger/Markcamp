@@ -249,6 +249,10 @@ export function assertSnapshotBelongsTo(projectId: string, snapshot: ProjectSnap
  *   species in no specified order.
  * - Arrays and objects handed out are never mutated afterwards.
  * - observeProject(X) never contains data or queue items of another project.
+ * - The last project (slice F4-2b) is a device setting, neither the confirmed copy nor the
+ *   queue: writing it changes no project, site, event or queue item, and no other write
+ *   (replaceProjects, replaceProjectSnapshot, confirm and the rest) changes it. It is read
+ *   once, not observed: only this device's screens write it.
  */
 export interface LocalStore {
   observeProjects(): Observable<ProjectsRaw>
@@ -296,4 +300,9 @@ export interface LocalStore {
    * another projectId (assertSnapshotBelongsTo).
    */
   replaceProjectSnapshot(projectId: string, snapshot: ProjectSnapshot): Promise<void>
+
+  /** The project id stored by writeLastProject(), or null when none was ever written. */
+  readLastProject(): Promise<string | null>
+  /** Stores the last project the user opened, replacing the previous one. */
+  writeLastProject(projectId: string): Promise<void>
 }

@@ -16,6 +16,7 @@ import RecordEventScreen from './RecordEventScreen'
 import SettingsScreen from './SettingsScreen'
 import SignInScreen from './SignInScreen'
 import SiteScreen from './SiteScreen'
+import { startScreen, type StartScreen } from './startScreen'
 
 // Never getIdentity: the uid must not reach ui.
 type AppStore = SessionStore & Pick<SessionIdentitySource, 'retryBackendCheck'>
@@ -89,8 +90,14 @@ interface Nav {
   readonly mapView: { readonly projectId: string; readonly view: MapView } | null
 }
 
-function startNav(snapshot: ReadySnapshot): Nav {
-  return { snapshot, screen: PROJECTS, currentProjectId: null, mapView: null }
+/** Where a session opens, decided once per ready snapshot (slice F4-2b). Never a saved map view. */
+function startNav(snapshot: ReadySnapshot, start: Exclude<StartScreen, { readonly kind: 'deciding' }>): Nav {
+  switch (start.kind) {
+    case 'projects':
+      return { snapshot, screen: PROJECTS, currentProjectId: null, mapView: null }
+    case 'map':
+      return { snapshot, screen: { kind: 'map', projectId: start.projectId }, currentProjectId: start.projectId, mapView: null }
+  }
 }
 
 /** A signed-in screen with no local data to show yet: a message, maybe an action, and sign-out. */
@@ -109,24 +116,48 @@ function LocalStatusScreen({ store, children }: { store: AppStore; children: Rea
 type ReadyProps = Omit<AppProps, 'installed'> & { email: string | null; snapshot: ReadySnapshot }
 
 function Ready({ store, local, commands, geolocation, tileApiKey, appVersion, email, snapshot }: ReadyProps) {
+  const lastProjectId = useSyncExternalStore(snapshot.lastProjectId.subscribe, snapshot.lastProjectId.getSnapshot)
+  const projects = useSyncExternalStore(snapshot.projects.subscribe, snapshot.projects.getSnapshot)
+  const start = startScreen(lastProjectId, projects)
+
   // Navigation is kept with the snapshot it belongs to. A new ready snapshot (another
-  // session) starts at Projects, with no current project and no saved map view: whoever
-  // signs in never lands on the previous session's project.
-  const [nav, setNav] = useState<Nav>(() => startNav(snapshot))
-  const state = nav.snapshot === snapshot ? nav : startNav(snapshot)
+  // session) drops the previous one's screen, current project and saved map view, and opens
+  // where its own database says (slice F4-2b): whoever signs in never lands on the previous
+  // session's project. The start is decided once per snapshot: stored with setNav while
+  // rendering (React's "adjust state while rendering"), so a later change of the list never
+  // moves the user.
+  const [nav, setNav] = useState<Nav | null>(null)
+  let state = nav !== null && nav.snapshot === snapshot ? nav : null
+  if (state === null && start.kind !== 'deciding') {
+    state = startNav(snapshot, start)
+    setNav(state)
+  }
+  if (state === null) {
+    return (
+      <LocalStatusScreen store={store}>
+        <p>{ptBR.loading}</p>
+      </LocalStatusScreen>
+    )
+  }
   const { screen, currentProjectId } = state
   const update = (change: (current: Nav) => Partial<Omit<Nav, 'snapshot'>>) =>
     setNav((previous) => {
-      const current = previous.snapshot === snapshot ? previous : startNav(snapshot)
-      return { ...current, ...change(current) }
+      // A handler of another session's screen changes nothing.
+      if (previous === null || previous.snapshot !== snapshot) return previous
+      return { ...previous, ...change(previous) }
     })
   // A screen of a project makes it the current one; Projects, Settings and New project
-  // belong to no project and leave the current one as it was.
-  const go = (next: Screen) =>
+  // belong to no project and leave the current one as it was. A change of the current
+  // project is remembered for the next start: here, not in the updater, which must stay pure
+  // (StrictMode runs it twice). local.rememberProject is ui's only write outside the
+  // localCommands commands, local.retry and local.discard; it never enters the queue.
+  const go = (next: Screen) => {
+    if ('projectId' in next && next.projectId !== currentProjectId) void local.rememberProject(next.projectId)
     update((current) => ({
       screen: next,
       currentProjectId: 'projectId' in next ? next.projectId : current.currentProjectId,
     }))
+  }
 
   /** A bar screen: the content, then the bar acting on the current project. */
   const withNav = (tab: NavTab, content: ReactNode) => (

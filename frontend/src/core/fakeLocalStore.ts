@@ -32,6 +32,8 @@ interface State {
   readonly queue: readonly QueueItem[]
   /** Never decreases, so a seq is never reused (like an IndexedDB key generator). */
   readonly nextSeq: number
+  /** The settings table of the Dexie adapter: neither the copy nor the queue. */
+  readonly lastProjectId: string | null
 }
 
 function byId(a: { readonly id: string }, b: { readonly id: string }): number {
@@ -93,6 +95,7 @@ export function createFakeLocalStore(): LocalStore {
     species: [],
     queue: [],
     nextSeq: 1,
+    lastProjectId: null,
   }
   // One notifier per observable that has listeners.
   const notifiers = new Set<() => void>()
@@ -207,6 +210,14 @@ export function createFakeLocalStore(): LocalStore {
         events: withPut(withPut(new Map(), otherEvents), snapshot.events),
         species: [...snapshot.species],
       })
+    },
+
+    async readLastProject() {
+      return state.lastProjectId
+    },
+
+    async writeLastProject(projectId) {
+      commit({ ...state, lastProjectId: projectId })
     },
   }
 }

@@ -4,7 +4,7 @@ import { createFakeLocalStore } from '../core/fakeLocalStore'
 import { toHistoryInstant, type HistoryInstant } from '../core/historyOrder'
 import { createLocalCommands } from '../core/localCommands'
 import type { LocalSessionSnapshot } from '../core/localSession'
-import type { LocalEvent } from '../core/localStore'
+import { LOADING, type LocalEvent, type LocalStore, type Observable, type ProjectsRaw } from '../core/localStore'
 import type { SessionSnapshot } from '../core/sessionStore'
 import App from './App'
 import { createFakeGeolocation } from './fakeGeolocation'
@@ -84,7 +84,8 @@ describe('signed in, by local session status', () => {
   test('ready shows the home screen with the projects', async () => {
     renderApp(SIGNED_IN, createReadyLocalSession().local)
 
-    expect(screen.getByRole('heading', { name: ptBR.projects.title })).toBeTruthy()
+    // After the start is decided (slice F4-2b): nothing stored, so Projects.
+    expect(await screen.findByRole('heading', { name: ptBR.projects.title })).toBeTruthy()
     expect(await screen.findByText(ptBR.projects.empty)).toBeTruthy()
     expect(screen.queryByRole('button', { name: ptBR.signIn.submit })).toBeNull()
   })
@@ -120,10 +121,10 @@ describe('navigation', () => {
   }
 
   /**
-   * Signed in and ready, over a fake LocalStore with project "Apiário" (sites Isca 1 and Isca 2,
-   * at the same spot) and project "Outro" (one site, Isca 9, elsewhere).
+   * A fake LocalStore with project "Apiário" (sites Isca 1 and Isca 2, at the same spot) and
+   * project "Outro" (one site, Isca 9, elsewhere), and the given last project.
    */
-  async function renderReady() {
+  async function populatedStore(lastProjectId: string | null = null) {
     const fakeStore = createFakeLocalStore()
     await fakeStore.replaceProjects([
       { id: PROJECT_ID, name: 'Apiário', role: 'OWNER', createdAt: '2026-11-01T12:00:00Z' },
@@ -159,6 +160,12 @@ describe('navigation', () => {
       events: [installed('s-9', OTHER_ID, occurredAt)],
       species: [],
     })
+    if (lastProjectId !== null) await fakeStore.writeLastProject(lastProjectId)
+    return fakeStore
+  }
+
+  /** Signed in and ready over `store`, without waiting for the start to be decided. */
+  function renderReadyOver(fakeStore: LocalStore) {
     const ready = createReadyLocalSession(fakeStore)
     const geo = createFakeGeolocation()
     const store = createFakeStore(SIGNED_IN)
@@ -174,8 +181,14 @@ describe('navigation', () => {
         appVersion="abc1234"
       />,
     )
-    await screen.findByRole('button', { name: 'Apiário' })
     return { ...ready, geo }
+  }
+
+  /** Signed in and ready over populatedStore(), with nothing stored: the start is Projects. */
+  async function renderReady() {
+    const rendered = renderReadyOver(await populatedStore())
+    await screen.findByRole('button', { name: 'Apiário' })
+    return rendered
   }
 
   const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
@@ -427,7 +440,8 @@ describe('navigation', () => {
       local.setSnapshot(nextSnapshot)
     })
 
-    expect(projectsHeading()).toBeTruthy()
+    // After the start is decided: the new store has no last project.
+    expect(await screen.findByRole('heading', { name: ptBR.projects.title })).toBeTruthy()
     expect(settingsHeading()).toBeNull()
     expect(screen.getByRole<HTMLButtonElement>('button', { name: ptBR.nav.map }).disabled).toBe(true)
   })
@@ -480,11 +494,144 @@ describe('navigation', () => {
       local.setSnapshot(nextSnapshot)
     })
 
-    expect(projectsHeading()).toBeTruthy()
+    // After the start is decided: the new store has no last project.
+    expect(await screen.findByRole('heading', { name: ptBR.projects.title })).toBeTruthy()
     expect(mapShown()).toBe(false)
     expect(await screen.findByText(ptBR.projects.empty)).toBeTruthy()
     // No current project either: the previous session's project is not one tap away.
     expect(screen.getByRole<HTMLButtonElement>('button', { name: ptBR.nav.map }).disabled).toBe(true)
+  })
+
+  describe('the start on the last project (slice F4-2b)', () => {
+    const enabled = (name: string) => !screen.getByRole<HTMLButtonElement>('button', { name }).disabled
+
+    test("the last project stored and in the list: the app opens on its map, as the current project", async () => {
+      const { local } = renderReadyOver(await populatedStore(PROJECT_ID))
+
+      expect(await screen.findByText('Apiário · 2 iscas')).toBeTruthy()
+      expect(projectsHeading()).toBeNull()
+      expect(screen.getByRole('button', { name: ptBR.nav.map }).getAttribute('aria-current')).toBe('page')
+      expect([enabled(ptBR.nav.map), enabled(ptBR.nav.list)]).toEqual([true, true])
+      expect(enabled(ptBR.sites.newSite)).toBe(true)
+      expect(screen.queryByRole('button', { name: ptBR.projects.newProject })).toBeNull()
+
+      // Opening it again is not a change of the current project: nothing is written.
+      click(ptBR.nav.list)
+      expect(await screen.findByRole('heading', { name: 'Apiário' })).toBeTruthy()
+      click(ptBR.nav.map)
+      await screen.findByText('Apiário · 2 iscas')
+      expect(local.rememberProject).not.toHaveBeenCalled()
+    })
+
+    test('the last project stored but gone from the list: Projects, no current project', async () => {
+      renderReadyOver(await populatedStore('p-gone'))
+
+      expect(await screen.findByRole('heading', { name: ptBR.projects.title })).toBeTruthy()
+      expect(mapShown()).toBe(false)
+      expect(enabled(ptBR.nav.map)).toBe(false)
+    })
+
+    /** `store` with one of its two start sources held at loading until release() is called. */
+    function holding(fakeStore: LocalStore, held: 'last project' | 'list') {
+      let release: () => void = () => {}
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      if (held === 'last project') {
+        return { store: { ...fakeStore, readLastProject: () => gate.then(() => fakeStore.readLastProject()) }, release }
+      }
+      const observeProjects = (): Observable<ProjectsRaw> => {
+        const inner = fakeStore.observeProjects()
+        let open = false
+        void gate.then(() => {
+          open = true
+        })
+        return {
+          subscribe(listener) {
+            const unsubscribe = inner.subscribe(listener)
+            void gate.then(listener)
+            return unsubscribe
+          },
+          getSnapshot: () => (open ? inner.getSnapshot() : LOADING),
+        }
+      }
+      return { store: { ...fakeStore, observeProjects }, release }
+    }
+
+    test.each(['last project', 'list'] as const)(
+      'while the %s is loading: the loading text, neither Projects nor the map',
+      async (held) => {
+        const gated = holding(await populatedStore(PROJECT_ID), held)
+        renderReadyOver(gated.store)
+        // The other source has loaded by now.
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+        })
+
+        expect(screen.getByText(ptBR.loading)).toBeTruthy()
+        expect(projectsHeading()).toBeNull()
+        expect(mapShown()).toBe(false)
+
+        await act(async () => gated.release())
+        expect(await screen.findByText('Apiário · 2 iscas')).toBeTruthy()
+        expect(screen.queryByText(ptBR.loading)).toBeNull()
+      },
+    )
+
+    test('rememberProject: once when a project is opened, not on screen changes, again for another project', async () => {
+      const { local } = await renderReady()
+
+      await openProject()
+      expect(local.rememberProject.mock.calls).toEqual([[PROJECT_ID]])
+
+      click(ptBR.nav.list)
+      await screen.findByText('Isca 2')
+      click(ptBR.nav.settings)
+      click(ptBR.nav.map)
+      await screen.findByText('Apiário · 2 iscas')
+      expect(local.rememberProject.mock.calls).toEqual([[PROJECT_ID]])
+
+      click(ptBR.nav.projects)
+      click('Outro')
+      await screen.findByText('Outro · 1 isca')
+      expect(local.rememberProject.mock.calls).toEqual([[PROJECT_ID], [OTHER_ID]])
+    })
+
+    test('decided once: a list change that removes the project does not move the screen to Projects', async () => {
+      const { store, projects } = renderReadyOver(await populatedStore(PROJECT_ID))
+      await screen.findByText('Apiário · 2 iscas')
+
+      await act(async () => {
+        await store.replaceProjects([{ id: OTHER_ID, name: 'Outro', role: 'OWNER', createdAt: '2026-11-01T12:00:00Z' }])
+      })
+      await vi.waitFor(() => {
+        const listed = projects.getSnapshot()
+        expect(listed.status === 'ready' && listed.value.map((entry) => entry.id)).toEqual([OTHER_ID])
+      })
+
+      // The map stays, as for any project that vanished while open.
+      expect(await screen.findByRole('heading', { name: ptBR.sites.projectNotFound })).toBeTruthy()
+      expect(projectsHeading()).toBeNull()
+      expect(screen.getByRole('button', { name: ptBR.nav.map }).getAttribute('aria-current')).toBe('page')
+    })
+
+    test("a new ready snapshot opens its own store's last project, not the previous session's", async () => {
+      const { local } = await renderReady()
+      await openProject()
+
+      const next = createReadyLocalSession(await populatedStore(OTHER_ID))
+      const nextSnapshot = next.local.getSnapshot()
+      act(() => {
+        local.setSnapshot({ status: 'none' })
+        local.setSnapshot(nextSnapshot)
+      })
+
+      expect(await screen.findByText('Outro · 1 isca')).toBeTruthy()
+      expect(mapShown()).toBe(false)
+      // The current project is the new one: Lista shows Outro.
+      click(ptBR.nav.list)
+      expect(await screen.findByRole('heading', { name: 'Outro' })).toBeTruthy()
+    })
   })
 
   describe('Site and Record screens (decision L2 of slice F3-3a)', () => {
@@ -550,7 +697,8 @@ describe('navigation', () => {
         local.setSnapshot(nextSnapshot)
       })
 
-      expect(projectsHeading()).toBeTruthy()
+      // After the start is decided: the new store has no last project.
+      expect(await screen.findByRole('heading', { name: ptBR.projects.title })).toBeTruthy()
       expect(siteHeading()).toBeNull()
       expect(await screen.findByText(ptBR.projects.empty)).toBeTruthy()
     })

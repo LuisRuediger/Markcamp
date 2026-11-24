@@ -1,7 +1,7 @@
 import { vi } from 'vitest'
 import { createFakeLocalStore } from '../core/fakeLocalStore'
 import { createPendingCountView, createProjectViewCache, createProjectsView } from '../core/localMerge'
-import type { LocalSession, LocalSessionSnapshot } from '../core/localSession'
+import { createLastProjectView, type LocalSession, type LocalSessionSnapshot } from '../core/localSession'
 import type { LocalStore } from '../core/localStore'
 import type { SyncEngine, SyncStatus } from '../core/syncEngine'
 
@@ -42,7 +42,7 @@ export function createFakeSyncEngine(initial: SyncStatus = { phase: 'idle', last
   }
 }
 
-/** A LocalSession whose snapshot the test sets; submit, retry and discard are spies (mockRejectedValue makes them reject). */
+/** A LocalSession whose snapshot the test sets; submit, retry, discard and rememberProject are spies (mockRejectedValue makes them reject). */
 export function createFakeLocalSession(initial: LocalSessionSnapshot = { status: 'opening' }) {
   let snapshot = initial
   const { subscribe, notify } = createListeners()
@@ -52,6 +52,7 @@ export function createFakeLocalSession(initial: LocalSessionSnapshot = { status:
     submit: vi.fn<LocalSession['submit']>(async () => 'queued'),
     retry: vi.fn<LocalSession['retry']>(async () => {}),
     discard: vi.fn<LocalSession['discard']>(async () => {}),
+    rememberProject: vi.fn<LocalSession['rememberProject']>(async () => {}),
   } satisfies LocalSession
   return {
     ...local,
@@ -62,12 +63,16 @@ export function createFakeLocalSession(initial: LocalSessionSnapshot = { status:
   }
 }
 
-/** A ready local session over a fake LocalStore and the real projects, pending count and project views. */
+/**
+ * A ready local session over a fake LocalStore and the real projects, pending count, project
+ * and last project views. The last project is read here, once: write it to the store before.
+ */
 export function createReadyLocalSession(store: LocalStore = createFakeLocalStore()) {
   const sync = createFakeSyncEngine()
   const projects = createProjectsView(store)
   const pendingCount = createPendingCountView(store)
   const project = createProjectViewCache(store)
-  const local = createFakeLocalSession({ status: 'ready', sync, projects, pendingCount, project })
-  return { store, sync, projects, pendingCount, project, local }
+  const lastProjectId = createLastProjectView(store.readLastProject(), () => {})
+  const local = createFakeLocalSession({ status: 'ready', sync, projects, pendingCount, project, lastProjectId })
+  return { store, sync, projects, pendingCount, project, lastProjectId, local }
 }

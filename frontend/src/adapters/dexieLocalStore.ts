@@ -29,6 +29,15 @@ function databaseName(userId: string): string {
   return `markcamp-${userId}`
 }
 
+/**
+ * A device setting of this user (slice F4-2b): neither the confirmed copy nor the queue, so no
+ * sync code reads or writes it. One key only; another key does not compile without a decision.
+ */
+interface SettingRow {
+  readonly key: 'lastProjectId'
+  readonly value: string
+}
+
 class LocalDatabase extends Dexie {
   // `declare`: Dexie creates these properties itself in version().stores(); a class field
   // would be emitted and reset them. A typing of what Dexie provides, not an `as` cast.
@@ -37,13 +46,15 @@ class LocalDatabase extends Dexie {
   declare readonly events: EntityTable<LocalEvent, 'id'>
   declare readonly species: EntityTable<LocalSpecies, 'id'>
   declare readonly queue: EntityTable<QueueItem, 'seq'>
+  declare readonly settings: EntityTable<SettingRow, 'key'>
 
   constructor(name: string) {
     super(name)
-    // Schema version rule: until the first real use on the iPhone (slice F2d) version 1 may
-    // be edited; after that only a new version (with upgrade() if a row's shape changes),
-    // never an edit of an installed one. Dexie compares this version with the database on
-    // the device: an edited installed version leaves a schema the code does not know.
+    // Schema version rule: an installed version is never edited, only followed by a new one
+    // (with upgrade() only if a row's shape changes). Dexie compares these versions with the
+    // database on the device: an edited installed version leaves a schema the code does not
+    // know. Version 1 is frozen since 2026-11-12 (its first real use on the iPhone, slice
+    // F2d); version 2 is frozen from the moment it opens on the iPhone (slice F4-2b).
     // An index only where a port operation queries by it (decision D1 of slice F2b-2).
     // Locked by the schema test in dexieLocalStore.test.ts.
     this.version(1).stores({
@@ -53,6 +64,21 @@ class LocalDatabase extends Dexie {
       species: 'id',
       // ++: IndexedDB's key generator, which never reuses a number (port contract of seq).
       queue: '++seq',
+    })
+    // Version 2 (slice F4-2b) adds the settings table and declares only it: Dexie carries
+    // the version 1 tables forward unchanged. No upgrade(): a new table changes no existing
+    // row. IndexedDB never goes down a version, but Dexie 4 does not fail on it: a build that
+    // knows only version 1, opening a version 2 database, gets VersionError from IndexedDB,
+    // retries without a version and opens it as installed. It sees its own tables, ignores
+    // settings and changes nothing in the schema (locked by a test). So going back to an
+    // older build is safe for version 2, and only because version 2 is additive. A later
+    // version that changes a row's shape cannot count on this: an older build never runs our
+    // upgrade(), so it would read rows in the new shape that it does not know, and write rows
+    // in the old shape that the newer build, reopening, never upgrades (the version did not
+    // change). Such a version must accept rows in the old shape, or state that going back to
+    // an older build is no longer safe.
+    this.version(2).stores({
+      settings: 'key',
     })
   }
 }
@@ -224,6 +250,17 @@ export async function openDexieLocalStore(userId: string, logger: Logger): Promi
         await db.events.bulkPut(snapshot.events)
         await db.species.clear()
         await db.species.bulkPut(snapshot.species)
+      })
+    },
+
+    // Only the settings table, in its own transaction: no other operation lists it, so none
+    // can touch it, and these two cannot touch the copy or the queue.
+    readLastProject: () =>
+      db.transaction('r', db.settings, async (): Promise<string | null> => (await db.settings.get('lastProjectId'))?.value ?? null),
+
+    async writeLastProject(projectId) {
+      await db.transaction('rw', db.settings, async () => {
+        await db.settings.put({ key: 'lastProjectId', value: projectId })
       })
     },
 
