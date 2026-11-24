@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import react from '@vitejs/plugin-react'
 import { loadEnv } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
@@ -6,6 +7,10 @@ import { previewAllowedHosts } from './previewHost.ts'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
+  define: {
+    // Read only in src/main.tsx, which passes it down to the Ajustes screen.
+    __APP_VERSION__: JSON.stringify(appVersion()),
+  },
   plugins: [
     react(),
     VitePWA({
@@ -69,4 +74,16 @@ export default defineConfig(({ mode }) => ({
 // folder still reads frontend/.env.local.
 function previewHostVariable(mode: string): string | undefined {
   return loadEnv(mode, import.meta.dirname, 'MARKCAMP_')['MARKCAMP_PREVIEW_HOST']
+}
+
+// The commit the build was made from, shown on Ajustes. On the iPhone a new version waits
+// until the old service worker lets go, so a test on the phone needs to see which commit is
+// actually running. A build with uncommitted changes still shows the HEAD hash. No git (or no
+// repository): 'dev'.
+function appVersion(): string {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: import.meta.dirname, encoding: 'utf8' }).trim()
+  } catch {
+    return 'dev'
+  }
 }

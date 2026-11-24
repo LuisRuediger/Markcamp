@@ -47,8 +47,9 @@ export const ptBR = {
   },
   projects: {
     title: 'Projetos',
+    newProject: 'Novo projeto',
     loading: 'Carregando projetos…',
-    empty: 'Crie seu primeiro projeto',
+    empty: 'Nenhum projeto ainda. Toque em + para criar o primeiro.',
     nameLabel: 'Nome do projeto',
     create: 'Criar projeto',
     pendingMark: 'aguardando envio',
@@ -65,6 +66,16 @@ export const ptBR = {
     map: 'Mapa',
     list: 'Lista',
     projects: 'Projetos',
+    settings: 'Ajustes',
+  },
+  settings: {
+    title: 'Ajustes',
+    syncSection: 'Sincronização',
+    accountSection: 'Conta',
+    signOutWarning: 'Para entrar de novo você vai precisar de internet.',
+    confirmSignOut: 'Confirmar saída',
+    cancel: 'Cancelar',
+    version: (v: string) => `Versão ${v}`,
   },
   map: {
     empty: 'Nenhum ponto ainda. Toque em + para criar o primeiro.',

@@ -9,9 +9,11 @@ import HomeScreen from './HomeScreen'
 import { ptBR } from './i18n/pt-BR'
 import type { MapView } from './map/mapMarkers'
 import MapScreen from './MapScreen'
+import NewProjectScreen from './NewProjectScreen'
 import NewSiteScreen from './NewSiteScreen'
 import ProjectScreen from './ProjectScreen'
 import RecordEventScreen from './RecordEventScreen'
+import SettingsScreen from './SettingsScreen'
 import SignInScreen from './SignInScreen'
 import SiteScreen from './SiteScreen'
 
@@ -28,17 +30,22 @@ interface AppProps {
   geolocation: GeolocationPort
   /** Thunderforest API key (decision R3 of slice F4-1), passed down to the map only. */
   tileApiKey: string
+  /** The build's commit hash (decision T4 of slice F4-2a), passed down to Ajustes only. */
+  appVersion: string
 }
 
 type ReadySnapshot = Extract<LocalSessionSnapshot, { readonly status: 'ready' }>
 
-// Navigation (decisions J2 of slice F3, L2 of slice F3-3a, R6 and R7 of slice F4-1): screens
-// kept in memory, no router. Map, List and Projects have the bottom bar; New site, Site and
-// Record have "Voltar", which goes back to the screen they were opened from (`from`). Record
-// keeps its site's `from`, so the Site screen it returns to still knows its own way back.
+// Navigation (decisions J2 of slice F3, L2 of slice F3-3a, R6 and R7 of slice F4-1, T2 and T7
+// of slice F4-2a): screens kept in memory, no router. Map, List, Projects and Settings have
+// the bottom bar; New site, Site and Record have "Voltar", which goes back to the screen they
+// were opened from (`from`). Record keeps its site's `from`, so the Site screen it returns to
+// still knows its own way back. New project opens only from Projects and goes back there.
 type SiteOrigin = 'map' | 'list'
 type Screen =
   | { readonly kind: 'projects' }
+  | { readonly kind: 'settings' }
+  | { readonly kind: 'newProject' }
   | { readonly kind: 'map'; readonly projectId: string }
   | { readonly kind: 'list'; readonly projectId: string }
   | { readonly kind: 'newSite'; readonly projectId: string; readonly suggestedName: string; readonly from: NavTab }
@@ -52,10 +59,20 @@ type Screen =
     }
 
 const PROJECTS: Screen = { kind: 'projects' }
+const SETTINGS: Screen = { kind: 'settings' }
+const NEW_PROJECT: Screen = { kind: 'newProject' }
 
 /** The bar screen of a tab, for the current project. */
 function tabScreen(tab: NavTab, projectId: string): Screen {
-  return tab === 'projects' ? PROJECTS : { kind: tab, projectId }
+  switch (tab) {
+    case 'projects':
+      return PROJECTS
+    case 'settings':
+      return SETTINGS
+    case 'map':
+    case 'list':
+      return { kind: tab, projectId }
+  }
 }
 
 /** Everything navigation keeps in memory while the app is open, for one local session. */
@@ -91,7 +108,7 @@ function LocalStatusScreen({ store, children }: { store: AppStore; children: Rea
 
 type ReadyProps = Omit<AppProps, 'installed'> & { email: string | null; snapshot: ReadySnapshot }
 
-function Ready({ store, local, commands, geolocation, tileApiKey, email, snapshot }: ReadyProps) {
+function Ready({ store, local, commands, geolocation, tileApiKey, appVersion, email, snapshot }: ReadyProps) {
   // Navigation is kept with the snapshot it belongs to. A new ready snapshot (another
   // session) starts at Projects, with no current project and no saved map view: whoever
   // signs in never lands on the previous session's project.
@@ -103,11 +120,12 @@ function Ready({ store, local, commands, geolocation, tileApiKey, email, snapsho
       const current = previous.snapshot === snapshot ? previous : startNav(snapshot)
       return { ...current, ...change(current) }
     })
-  // Every screen but Projects belongs to a project, which becomes the current one.
+  // A screen of a project makes it the current one; Projects, Settings and New project
+  // belong to no project and leave the current one as it was.
   const go = (next: Screen) =>
     update((current) => ({
       screen: next,
-      currentProjectId: next.kind === 'projects' ? current.currentProjectId : next.projectId,
+      currentProjectId: 'projectId' in next ? next.projectId : current.currentProjectId,
     }))
 
   /** A bar screen: the content, then the bar acting on the current project. */
@@ -124,9 +142,11 @@ function Ready({ store, local, commands, geolocation, tileApiKey, email, snapsho
           if (currentProjectId !== null) go({ kind: 'list', projectId: currentProjectId })
         }}
         onProjects={() => go(PROJECTS)}
+        onSettings={() => go(SETTINGS)}
         onNewSite={(suggestedName) => {
           if (currentProjectId !== null) go({ kind: 'newSite', projectId: currentProjectId, suggestedName, from: tab })
         }}
+        onNewProject={() => go(NEW_PROJECT)}
       />
     </div>
   )
@@ -135,17 +155,21 @@ function Ready({ store, local, commands, geolocation, tileApiKey, email, snapsho
     case 'projects':
       return withNav(
         'projects',
-        <HomeScreen
+        <HomeScreen local={local} projects={snapshot.projects} onOpenProject={(projectId) => go({ kind: 'map', projectId })} />,
+      )
+    case 'settings':
+      return withNav(
+        'settings',
+        <SettingsScreen
           store={store}
-          local={local}
-          commands={commands}
           email={email}
-          projects={snapshot.projects}
           pendingCount={snapshot.pendingCount}
           sync={snapshot.sync}
-          onOpenProject={(projectId) => go({ kind: 'map', projectId })}
+          appVersion={appVersion}
         />,
       )
+    case 'newProject':
+      return <NewProjectScreen commands={commands} onBack={() => go(PROJECTS)} onCreated={() => go(PROJECTS)} />
     case 'map': {
       const { projectId } = screen
       const saved = state.mapView
@@ -218,7 +242,15 @@ function Ready({ store, local, commands, geolocation, tileApiKey, email, snapsho
   }
 }
 
-function SignedIn({ store, local, commands, geolocation, tileApiKey, email }: Omit<AppProps, 'installed'> & { email: string | null }) {
+function SignedIn({
+  store,
+  local,
+  commands,
+  geolocation,
+  tileApiKey,
+  appVersion,
+  email,
+}: Omit<AppProps, 'installed'> & { email: string | null }) {
   const snapshot = useSyncExternalStore(local.subscribe, local.getSnapshot)
 
   switch (snapshot.status) {
@@ -253,6 +285,7 @@ function SignedIn({ store, local, commands, geolocation, tileApiKey, email }: Om
           commands={commands}
           geolocation={geolocation}
           tileApiKey={tileApiKey}
+          appVersion={appVersion}
           email={email}
           snapshot={snapshot}
         />
@@ -260,7 +293,7 @@ function SignedIn({ store, local, commands, geolocation, tileApiKey, email }: Om
   }
 }
 
-function Body({ store, local, commands, geolocation, tileApiKey }: Omit<AppProps, 'installed'>) {
+function Body({ store, local, commands, geolocation, tileApiKey, appVersion }: Omit<AppProps, 'installed'>) {
   const session = useSyncExternalStore(store.subscribe, store.getSnapshot)
 
   switch (session.status) {
@@ -280,19 +313,27 @@ function Body({ store, local, commands, geolocation, tileApiKey }: Omit<AppProps
           commands={commands}
           geolocation={geolocation}
           tileApiKey={tileApiKey}
+          appVersion={appVersion}
           email={session.email}
         />
       )
   }
 }
 
-function App({ store, local, commands, installed, geolocation, tileApiKey }: AppProps) {
+function App({ store, local, commands, installed, geolocation, tileApiKey, appVersion }: AppProps) {
   return (
     <>
       {/* In every state: on the iPhone a sign-in done in a Safari tab does not carry into
           the installed app, so installing first avoids doing it twice. Not dismissible. */}
       {!installed && <p className="install-banner">{ptBR.installBanner}</p>}
-      <Body store={store} local={local} commands={commands} geolocation={geolocation} tileApiKey={tileApiKey} />
+      <Body
+        store={store}
+        local={local}
+        commands={commands}
+        geolocation={geolocation}
+        tileApiKey={tileApiKey}
+        appVersion={appVersion}
+      />
     </>
   )
 }

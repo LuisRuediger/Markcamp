@@ -29,6 +29,7 @@ function renderApp(
       installed={installed}
       geolocation={createFakeGeolocation().port}
       tileApiKey="key"
+      appVersion="abc1234"
     />,
   )
   return { store, local }
@@ -163,7 +164,15 @@ describe('navigation', () => {
     const store = createFakeStore(SIGNED_IN)
     const commands = createLocalCommands(ready.local, { newId: () => 'id-1' }, () => new Date('2026-11-12T12:00:00Z'))
     render(
-      <App store={store} local={ready.local} commands={commands} installed geolocation={geo.port} tileApiKey="key" />,
+      <App
+        store={store}
+        local={ready.local}
+        commands={commands}
+        installed
+        geolocation={geo.port}
+        tileApiKey="key"
+        appVersion="abc1234"
+      />,
     )
     await screen.findByRole('button', { name: 'Apiário' })
     return { ...ready, geo }
@@ -177,6 +186,8 @@ describe('navigation', () => {
   /** The List's title: the Map's h1 is "MarkCamp". */
   const listHeading = () => screen.queryByRole('heading', { name: 'Apiário' })
   const newSiteHeading = () => screen.queryByRole('heading', { name: ptBR.sites.newSite })
+  const newProjectHeading = () => screen.queryByRole('heading', { name: ptBR.projects.newProject })
+  const settingsHeading = () => screen.queryByRole('heading', { name: ptBR.settings.title })
   const siteHeading = () => screen.queryByRole('heading', { name: 'Isca 1' })
   const recordHeading = () => screen.queryByRole('heading', { name: 'Registrar inspeção' })
 
@@ -206,14 +217,14 @@ describe('navigation', () => {
     await screen.findByText('Isca 2')
   }
 
-  test('a new session starts at Projects, with Mapa, Lista and + disabled', async () => {
+  test('a new session starts at Projects, with Mapa and Lista disabled and + as Novo projeto', async () => {
     await renderReady()
 
     expect(projectsHeading()).toBeTruthy()
-    const disabled = [ptBR.nav.map, ptBR.nav.list, ptBR.sites.newSite].map(
+    const disabled = [ptBR.nav.map, ptBR.nav.list, ptBR.projects.newProject, ptBR.nav.settings].map(
       (name) => screen.getByRole<HTMLButtonElement>('button', { name }).disabled,
     )
-    expect(disabled).toEqual([true, true, true])
+    expect(disabled).toEqual([true, true, false, false])
   })
 
   test('tapping a project opens its map: the header, one marker per site, the bar', async () => {
@@ -312,17 +323,113 @@ describe('navigation', () => {
     expect(mapShown()).toBe(false)
   })
 
-  test('+ on Projects, after a project was opened: back to Projects', async () => {
-    await renderReady()
+  test('+ on Projects, after a project was opened: Novo projeto, no bar; Voltar goes back to Projects', async () => {
+    const { geo } = await renderReady()
     await openProject()
     click(ptBR.nav.projects)
+
+    click(ptBR.projects.newProject)
+    expect(newProjectHeading()).toBeTruthy()
+    expect(newSiteHeading()).toBeNull()
+    expect(geo.watch).not.toHaveBeenCalled()
+    expect(screen.queryByRole('navigation')).toBeNull()
+
+    back()
+    expect(projectsHeading()).toBeTruthy()
+    expect(newProjectHeading()).toBeNull()
+    // The current project is still the one opened before.
+    click(ptBR.nav.map)
+    expect(await screen.findByText('Apiário · 2 iscas')).toBeTruthy()
+  })
+
+  test("creating a project goes back to Projects, with the new project's row pending", async () => {
+    const { local, store } = await renderReady()
+    // This fake's submit enqueues for real, so the merge view shows the new row.
+    local.submit.mockImplementation(async (payload) => {
+      await store.enqueue(payload)
+      return 'queued'
+    })
+
+    click(ptBR.projects.newProject)
+    fireEvent.change(screen.getByLabelText(ptBR.projects.nameLabel), { target: { value: 'Sítio novo' } })
+    click(ptBR.projects.create)
+
+    const row = (await screen.findByRole('button', { name: 'Sítio novo' })).closest('li')
+    expect(projectsHeading()).toBeTruthy()
+    expect(newProjectHeading()).toBeNull()
+    expect(row?.textContent).toContain(ptBR.projects.pendingMark)
+  })
+
+  test('first use, no project opened: + on Projects opens Novo projeto, and Ajustes opens', async () => {
+    await renderReady()
+
+    click(ptBR.projects.newProject)
+    expect(newProjectHeading()).toBeTruthy()
+    back()
+    expect(projectsHeading()).toBeTruthy()
+
+    click(ptBR.nav.settings)
+    expect(settingsHeading()).toBeTruthy()
+    expect(screen.getByRole('button', { name: ptBR.nav.settings }).getAttribute('aria-current')).toBe('page')
+    // Still no current project: + on Ajustes is Novo ponto, disabled.
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: ptBR.sites.newSite }).disabled).toBe(true)
+  })
+
+  test('Ajustes from the map, then Mapa goes back to the same project', async () => {
+    await renderReady()
+    await openProject()
+
+    click(ptBR.nav.settings)
+    expect(settingsHeading()).toBeTruthy()
+    expect(mapShown()).toBe(false)
+
+    click(ptBR.nav.map)
+    expect(await screen.findByText('Apiário · 2 iscas')).toBeTruthy()
+    expect(settingsHeading()).toBeNull()
+  })
+
+  test('+ on Ajustes opens Novo ponto; Voltar and Salvar go back to Ajustes', async () => {
+    const { geo } = await renderReady()
+    await openProject()
+    click(ptBR.nav.settings)
 
     click(ptBR.sites.newSite)
     expect(newSiteHeading()).toBeTruthy()
     expect(screen.getByLabelText<HTMLInputElement>(ptBR.sites.nameLabel).value).toBe('Isca 3')
-
     back()
+    expect(settingsHeading()).toBeTruthy()
+    expect(mapShown()).toBe(false)
+
+    click(ptBR.sites.newSite)
+    act(() => geo.emit({ latitude: -27.3, longitude: -49.3, accuracyM: 6 }))
+    click(ptBR.sites.save)
+    expect(await screen.findByRole('heading', { name: ptBR.settings.title })).toBeTruthy()
+    expect(newSiteHeading()).toBeNull()
+  })
+
+  test('the build version reaches Ajustes', async () => {
+    await renderReady()
+
+    click(ptBR.nav.settings)
+
+    expect(screen.getByText(ptBR.settings.version('abc1234'))).toBeTruthy()
+  })
+
+  test('a new ready snapshot starts at Projects, even from Ajustes', async () => {
+    const { local } = await renderReady()
+    await openProject()
+    click(ptBR.nav.settings)
+
+    const next = createReadyLocalSession()
+    const nextSnapshot = next.local.getSnapshot()
+    act(() => {
+      local.setSnapshot({ status: 'none' })
+      local.setSnapshot(nextSnapshot)
+    })
+
     expect(projectsHeading()).toBeTruthy()
+    expect(settingsHeading()).toBeNull()
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: ptBR.nav.map }).disabled).toBe(true)
   })
 
   test('the map keeps its view for the same project, and not for another', async () => {
@@ -467,13 +574,22 @@ describe('navigation', () => {
     })
   })
 
-  test('the sync bar and Sair are on Projects only', async () => {
+  test('the sync bar and Sair are on Ajustes only', async () => {
     const { geo } = await renderReady()
     const syncBarShown = () => screen.queryByRole('button', { name: ptBR.sync.syncNow }) !== null
     const statusShown = () => screen.queryByRole('status') !== null
     const signOutShown = () => screen.queryByRole('button', { name: ptBR.home.signOut }) !== null
 
+    expect([syncBarShown(), statusShown(), signOutShown()]).toEqual([false, false, false])
+
+    click(ptBR.nav.settings)
     expect([syncBarShown(), statusShown(), signOutShown()]).toEqual([true, true, true])
+
+    click(ptBR.nav.projects)
+    click(ptBR.projects.newProject)
+    expect(newProjectHeading()).toBeTruthy()
+    expect([syncBarShown(), statusShown(), signOutShown()]).toEqual([false, false, false])
+    back()
 
     await openProject()
     expect([syncBarShown(), statusShown(), signOutShown()]).toEqual([false, false, false])

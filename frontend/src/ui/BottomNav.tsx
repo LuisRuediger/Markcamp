@@ -4,13 +4,14 @@ import type { ProjectView } from '../core/localMerge'
 import type { Observable } from '../core/localStore'
 import { ptBR } from './i18n/pt-BR'
 
-// The bottom bar of the Map, List and Projects screens (decision R7 of slice F4-1): Mapa,
-// Lista, a large + in the middle, Projetos, and an empty fifth column (Ajustes arrives in
-// slice F4-2; the + stays centred). Mapa, Lista and + act on the current project, the last
-// one opened. The only data it reads is that project's view, for the + (decision K3: a
-// rejected project gets no new sites).
+// The bottom bar of the Map, List, Projects and Settings screens (decision R7 of slice F4-1,
+// T2 of slice F4-2a): Mapa, Lista, a large + in the middle, Projetos and Ajustes. Mapa and
+// Lista act on the current project, the last one opened. The + does the action of the screen
+// it is on (decision T6-b): on Projetos it opens "Novo projeto", always enabled (the first-use
+// path); everywhere else it opens "Novo ponto" on the current project. The only data it reads
+// is that project's view, for "Novo ponto" (decision K3: a rejected project gets no new sites).
 
-export type NavTab = 'map' | 'list' | 'projects'
+export type NavTab = 'map' | 'list' | 'projects' | 'settings'
 
 export interface BottomNavProps {
   current: NavTab
@@ -19,8 +20,11 @@ export interface BottomNavProps {
   onMap: () => void
   onList: () => void
   onProjects: () => void
-  /** "Isca N", computed from the current project's sites at the tap. */
+  onSettings: () => void
+  /** The + on Mapa, Lista and Ajustes: "Isca N", computed from the current project's sites at the tap. */
   onNewSite: (suggestedName: string) => void
+  /** The + on Projetos. */
+  onNewProject: () => void
 }
 
 // Outline icons, 24 px. Decorative: the label under each one names the button.
@@ -60,6 +64,13 @@ const PROJECTS_ICON = (
   </Icon>
 )
 
+const SETTINGS_ICON = (
+  <Icon>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+  </Icon>
+)
+
 function Item({
   tab,
   current,
@@ -89,9 +100,10 @@ function Item({
   )
 }
 
-function PlusButton({ disabled, onClick }: { disabled: boolean; onClick: () => void }) {
+/** The + itself. Its accessible name says what it does on this screen. */
+function PlusButton({ label, disabled, onClick }: { label: string; disabled: boolean; onClick: () => void }) {
   return (
-    <button type="button" className="bottom-nav__plus" aria-label={ptBR.sites.newSite} disabled={disabled} onClick={onClick}>
+    <button type="button" className="bottom-nav__plus" aria-label={label} disabled={disabled} onClick={onClick}>
       <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
         <path d="M12 5v14M5 12h14" />
       </svg>
@@ -108,6 +120,7 @@ function ProjectPlusButton({ project, onNewSite }: { project: Observable<Project
   const canCreate = view !== null && view.project !== null && view.project.rejection === null
   return (
     <PlusButton
+      label={ptBR.sites.newSite}
       disabled={!canCreate}
       onClick={() => {
         if (canCreate) onNewSite(suggestBaitSiteName(view.baitSites.map((site) => site.name)))
@@ -116,22 +129,24 @@ function ProjectPlusButton({ project, onNewSite }: { project: Observable<Project
   )
 }
 
-function BottomNav({ current, project, onMap, onList, onProjects, onNewSite }: BottomNavProps) {
+function CenterButton({ current, project, onNewSite, onNewProject }: Pick<BottomNavProps, 'current' | 'project' | 'onNewSite' | 'onNewProject'>) {
+  // By screen, not by state: on Projetos the + never reads the project's view.
+  if (current === 'projects') return <PlusButton label={ptBR.projects.newProject} disabled={false} onClick={onNewProject} />
+  if (project === null) return <PlusButton label={ptBR.sites.newSite} disabled onClick={() => {}} />
+  return <ProjectPlusButton project={project} onNewSite={onNewSite} />
+}
+
+function BottomNav({ current, project, onMap, onList, onProjects, onSettings, onNewSite, onNewProject }: BottomNavProps) {
   const none = project === null
   return (
     <nav className="bottom-nav">
       <Item tab="map" current={current} label={ptBR.nav.map} icon={MAP_ICON} disabled={none} onClick={onMap} />
       <Item tab="list" current={current} label={ptBR.nav.list} icon={LIST_ICON} disabled={none} onClick={onList} />
       <div className="bottom-nav__center">
-        {project === null ? (
-          <PlusButton disabled onClick={() => {}} />
-        ) : (
-          <ProjectPlusButton project={project} onNewSite={onNewSite} />
-        )}
+        <CenterButton current={current} project={project} onNewSite={onNewSite} onNewProject={onNewProject} />
       </div>
       <Item tab="projects" current={current} label={ptBR.nav.projects} icon={PROJECTS_ICON} disabled={false} onClick={onProjects} />
-      {/* Ajustes, in slice F4-2. */}
-      <div className="bottom-nav__slot" />
+      <Item tab="settings" current={current} label={ptBR.nav.settings} icon={SETTINGS_ICON} disabled={false} onClick={onSettings} />
     </nav>
   )
 }

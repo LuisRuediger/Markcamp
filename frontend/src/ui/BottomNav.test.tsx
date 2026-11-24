@@ -13,7 +13,9 @@ function setup(current: NavTab, project: Observable<ProjectView> | null) {
     onMap: vi.fn<() => void>(),
     onList: vi.fn<() => void>(),
     onProjects: vi.fn<() => void>(),
+    onSettings: vi.fn<() => void>(),
     onNewSite: vi.fn<(suggestedName: string) => void>(),
+    onNewProject: vi.fn<() => void>(),
   }
   const { container } = render(<BottomNav current={current} project={project} {...handlers} />)
   return { ...handlers, container }
@@ -44,27 +46,28 @@ async function confirmed(store: LocalStore) {
 
 const button = (name: string) => screen.getByRole<HTMLButtonElement>('button', { name })
 const plus = () => button(ptBR.sites.newSite)
+const newProject = () => button(ptBR.projects.newProject)
 
-test('Mapa, Lista, the +, Projetos and an empty fifth column, in that order', async () => {
+test('Mapa, Lista, the +, Projetos and Ajustes, in that order', async () => {
   const { container } = setup('map', await projectView(confirmed))
 
   const nav = screen.getByRole('navigation')
-  expect([...nav.children].map((child) => child.textContent)).toEqual(['Mapa', 'Lista', '', 'Projetos', ''])
+  expect([...nav.children].map((child) => child.textContent)).toEqual(['Mapa', 'Lista', '', 'Projetos', 'Ajustes'])
   expect(screen.getAllByRole('button').map((item) => item.getAttribute('aria-label') ?? item.textContent)).toEqual([
     'Mapa',
     'Lista',
     'Novo ponto',
     'Projetos',
+    'Ajustes',
   ])
-  // The fifth column holds nothing (Ajustes in slice F4-2).
-  expect(nav.lastElementChild?.childElementCount).toBe(0)
-  expect(container.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(4)
+  expect(container.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(5)
 })
 
 test.each<[NavTab, string]>([
   ['map', 'Mapa'],
   ['list', 'Lista'],
   ['projects', 'Projetos'],
+  ['settings', 'Ajustes'],
 ])('on %s, only %s is the current page', async (current, label) => {
   setup(current, await projectView(confirmed))
 
@@ -73,24 +76,110 @@ test.each<[NavTab, string]>([
 })
 
 test('the items call their handlers', async () => {
-  const { onMap, onList, onProjects } = setup('projects', await projectView(confirmed))
+  const { onMap, onList, onProjects, onSettings } = setup('projects', await projectView(confirmed))
 
   fireEvent.click(button('Mapa'))
   fireEvent.click(button('Lista'))
   fireEvent.click(button('Projetos'))
+  fireEvent.click(button('Ajustes'))
 
-  expect([onMap.mock.calls.length, onList.mock.calls.length, onProjects.mock.calls.length]).toEqual([1, 1, 1])
+  expect([
+    onMap.mock.calls.length,
+    onList.mock.calls.length,
+    onProjects.mock.calls.length,
+    onSettings.mock.calls.length,
+  ]).toEqual([1, 1, 1, 1])
 })
 
-test('no current project: Mapa, Lista and + disabled; Projetos enabled', () => {
-  setup('projects', null)
+test('no current project: Mapa, Lista and Novo ponto disabled; Projetos and Ajustes enabled', () => {
+  setup('map', null)
 
-  expect([button('Mapa').disabled, button('Lista').disabled, plus().disabled, button('Projetos').disabled]).toEqual([
-    true,
-    true,
-    true,
-    false,
-  ])
+  expect([
+    button('Mapa').disabled,
+    button('Lista').disabled,
+    plus().disabled,
+    button('Projetos').disabled,
+    button('Ajustes').disabled,
+  ]).toEqual([true, true, true, false, false])
+})
+
+test('Ajustes is enabled with a current project too', async () => {
+  setup('map', await projectView(confirmed))
+
+  expect(button('Ajustes').disabled).toBe(false)
+})
+
+describe('the + on Projetos: Novo projeto', () => {
+  test('named "Novo projeto", enabled with no current project, and calls onNewProject', () => {
+    const { onNewProject, onNewSite } = setup('projects', null)
+
+    expect(screen.queryByRole('button', { name: ptBR.sites.newSite })).toBeNull()
+    expect(newProject().disabled).toBe(false)
+    fireEvent.click(newProject())
+
+    expect(onNewProject).toHaveBeenCalledOnce()
+    expect(onNewSite).not.toHaveBeenCalled()
+  })
+
+  test('enabled with a rejected current project, and calls onNewProject', async () => {
+    const view = await projectView(async (store) => {
+      const item = await store.enqueue({ kind: 'createProject', projectId: P, name: 'Recusado' })
+      await store.markRejected(item.seq, { status: 409, code: 'INVALID_EVENT_SEQUENCE' })
+    })
+    const { onNewProject, onNewSite } = setup('projects', view)
+
+    // On Projetos the bar never subscribes to the view, so the test does, to load it.
+    const unsubscribe = view.subscribe(() => {})
+    await waitFor(() => expect(view.getSnapshot().status).toBe('ready'))
+    await act(async () => {})
+    expect(newProject().disabled).toBe(false)
+    fireEvent.click(newProject())
+
+    expect(onNewProject).toHaveBeenCalledOnce()
+    expect(onNewSite).not.toHaveBeenCalled()
+    unsubscribe()
+  })
+
+  test('enabled while the current project view is still loading', async () => {
+    setup('projects', await projectView(confirmed))
+
+    expect(newProject().disabled).toBe(false)
+  })
+})
+
+describe.each<NavTab>(['map', 'list', 'settings'])('the + on %s: Novo ponto', (current) => {
+  test('named "Novo ponto", disabled with no current project', () => {
+    const { onNewSite, onNewProject } = setup(current, null)
+
+    expect(screen.queryByRole('button', { name: ptBR.projects.newProject })).toBeNull()
+    expect(plus().disabled).toBe(true)
+    fireEvent.click(plus())
+    expect(onNewSite).not.toHaveBeenCalled()
+    expect(onNewProject).not.toHaveBeenCalled()
+  })
+
+  test('disabled while the view loads, then passes "Isca N"', async () => {
+    const { onNewSite, onNewProject } = setup(current, await projectView(confirmed))
+
+    expect(plus().disabled).toBe(true)
+    await waitFor(() => expect(plus().disabled).toBe(false))
+    fireEvent.click(plus())
+
+    expect(onNewSite).toHaveBeenCalledExactlyOnceWith('Isca 5')
+    expect(onNewProject).not.toHaveBeenCalled()
+  })
+
+  test('disabled for a rejected project', async () => {
+    const view = await projectView(async (store) => {
+      const item = await store.enqueue({ kind: 'createProject', projectId: P, name: 'Recusado' })
+      await store.markRejected(item.seq, { status: 409, code: 'INVALID_EVENT_SEQUENCE' })
+    })
+    setup(current, view)
+
+    await waitFor(() => expect(view.getSnapshot().status).toBe('ready'))
+    await act(async () => {})
+    expect(plus().disabled).toBe(true)
+  })
 })
 
 describe('the +', () => {

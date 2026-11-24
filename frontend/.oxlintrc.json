@@ -25,7 +25,8 @@
       // included, every time it is closed, with no error anywhere. Allowed only in
       // src/adapters/**/*.test.ts. Here for src/main.tsx and any file no later override
       // covers; a later override replaces this rule, so adapters and ui restate the ban
-      // (core already forbids every package).
+      // (core already forbids every package). The same goes for leaflet, allowed only in
+      // src/ui/map/LeafletMap.tsx and its test.
       "files": ["src/**"],
       "rules": {
         "no-restricted-imports": ["error", {
@@ -33,6 +34,10 @@
             {
               "group": ["fake-indexeddb", "fake-indexeddb/**"],
               "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
+            },
+            {
+              "group": ["leaflet", "leaflet/**"],
+              "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
             }
           ]
         }]
@@ -96,6 +101,10 @@
             {
               "group": ["fake-indexeddb", "fake-indexeddb/**"],
               "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
+            },
+            {
+              "group": ["leaflet", "leaflet/**"],
+              "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
             }
           ]
         }]
@@ -103,7 +112,7 @@
     },
     {
       // Adapter tests may import fake-indexeddb (Node has no IndexedDB). This replaces the
-      // rule of the override above, so the ui ban is restated.
+      // rule of the override above, so the ui and leaflet bans are restated.
       "files": ["src/adapters/**/*.test.ts"],
       "rules": {
         "no-restricted-imports": ["error", {
@@ -111,6 +120,10 @@
             {
               "group": ["**/ui", "**/ui/**"],
               "message": "adapters may not import ui. Wire them in src/main.tsx (ADR 0007)."
+            },
+            {
+              "group": ["leaflet", "leaflet/**"],
+              "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
             }
           ]
         }]

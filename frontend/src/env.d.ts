@@ -7,3 +7,6 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_APP_ID: string | undefined
   readonly VITE_THUNDERFOREST_API_KEY: string | undefined
 }
+
+// The build's commit hash (vite.config.ts, define). Read only in src/main.tsx.
+declare const __APP_VERSION__: string

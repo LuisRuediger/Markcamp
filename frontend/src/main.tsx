@@ -71,6 +71,7 @@ if (firebaseConfig.ok && mapConfig.ok) {
         installed={installed}
         geolocation={geolocation}
         tileApiKey={mapConfig.config.tileApiKey}
+        appVersion={__APP_VERSION__}
       />
     </StrictMode>,
   )

@@ -1,62 +1,46 @@
-import { useState, useSyncExternalStore, type FormEvent } from 'react'
-import type { LocalCommands } from '../core/localCommands'
+import { useSyncExternalStore } from 'react'
 import type { ProjectListEntry } from '../core/localMerge'
-import type { LocalSession, SubmitOutcome } from '../core/localSession'
-import type { Loadable, Observable } from '../core/localStore'
-import type { SessionStore } from '../core/sessionStore'
-import type { SyncEngine } from '../core/syncEngine'
-import { syncIndicator, type SyncIndicator } from '../core/syncIndicator'
+import type { LocalSession } from '../core/localSession'
+import type { Observable } from '../core/localStore'
 import { ptBR } from './i18n/pt-BR'
 import RejectionActions from './RejectionActions'
 
-// The home screen (the Projects screen) while the local session is ready (ADR 0008). It reads
-// only the merge view of confirmed copy + queue and the engine's status; its only writes are
-// commands.createProject, local.retry and local.discard. The sync bar and "Sair" live only
-// here (decision K2 of slice F3-2).
+// The Projects screen while the local session is ready (ADR 0008): the project list only. It
+// reads only the merge view of confirmed copy + queue; its only writes are local.retry and
+// local.discard. Creating a project is on its own screen (the + of the bar), and the sync
+// status and "Sair" are on Ajustes (decision Q8, which supersedes K2 of slice F3-2).
 
 interface HomeScreenProps {
-  store: Pick<SessionStore, 'signOut'>
   local: Pick<LocalSession, 'retry' | 'discard'>
-  commands: LocalCommands
-  email: string | null
-  /** All three belong to one local session: a new session gives new objects. */
+  /** Belongs to one local session: a new session gives a new object. */
   projects: Observable<readonly ProjectListEntry[]>
-  /** Queue items waiting to be sent, of every kind (not only projects). */
-  pendingCount: Observable<number>
-  sync: SyncEngine
-  /** Tapping a project's name opens its Project screen. */
+  /** Tapping a project's name opens its map. */
   onOpenProject: (projectId: string) => void
 }
 
-function indicatorText(indicator: SyncIndicator): string {
-  switch (indicator.kind) {
-    case 'syncing':
-      return ptBR.sync.syncing
-    case 'offline':
-      return indicator.pendingCount > 0
-        ? `${ptBR.sync.offline}. ${ptBR.sync.pending(indicator.pendingCount)}`
-        : ptBR.sync.offline
-    case 'pending':
-      return ptBR.sync.pending(indicator.pendingCount)
-    case 'notYet':
-      return ptBR.sync.notYet
-    case 'synced':
-      return ptBR.sync.synced
-  }
-}
-
-function SyncBar({ sync, pending }: { sync: SyncEngine; pending: Loadable<number> }) {
-  const status = useSyncExternalStore(sync.subscribe, sync.getSnapshot)
+// Outline icons, decorative: the button is named by the project's name.
+function RowIcon({ size, path, className }: { size: number; path: string; className: string }) {
   return (
-    <>
-      <p role="status">{indicatorText(syncIndicator(status, pending))}</p>
-      {/* Disabled while a pass runs: visible feedback that the tap was taken. */}
-      <button type="button" disabled={status.phase !== 'idle'} onClick={() => void sync.requestSync('full')}>
-        {ptBR.sync.syncNow}
-      </button>
-    </>
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={path} />
+    </svg>
   )
 }
+
+// The bar's Projetos icon.
+const FOLDER_PATH = 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z'
+const CHEVRON_PATH = 'M9 6l6 6-6 6'
 
 function rejectionText(code: string | null): string {
   return code === 'VALIDATION_FAILED' ? ptBR.projects.rejectedName : ptBR.projects.rejectedOther
@@ -72,46 +56,29 @@ function ProjectRow({
   onOpen: () => void
 }) {
   const { rejection } = project
+  const pending = project.pending && rejection === null
 
+  // The pending mark and the rejection are siblings of the button, not inside it: the
+  // button's accessible name stays the project's name. The mark is drawn under the name.
   return (
-    <li>
-      <button type="button" onClick={onOpen}>
-        {project.name}
+    <li className="project-row">
+      <button type="button" className={pending ? 'project-row__open project-row__open--noted' : 'project-row__open'} onClick={onOpen}>
+        <RowIcon className="project-row__icon" size={22} path={FOLDER_PATH} />
+        <span className="project-row__name">{project.name}</span>
+        <RowIcon className="project-row__icon" size={18} path={CHEVRON_PATH} />
       </button>
-      {project.pending && rejection === null && <span> · {ptBR.projects.pendingMark}</span>}
+      {pending && <span className="project-row__note">{ptBR.projects.pendingMark}</span>}
       {rejection !== null && (
-        <RejectionActions key={rejection.seq} text={rejectionText(rejection.code)} seq={rejection.seq} local={local} />
+        <div className="project-row__rejection">
+          <RejectionActions key={rejection.seq} text={rejectionText(rejection.code)} seq={rejection.seq} local={local} />
+        </div>
       )}
     </li>
   )
 }
 
-function HomeScreen({ store, local, commands, email, projects, pendingCount, sync, onOpenProject }: HomeScreenProps) {
+function HomeScreen({ local, projects, onOpenProject }: HomeScreenProps) {
   const list = useSyncExternalStore(projects.subscribe, projects.getSnapshot)
-  const pending = useSyncExternalStore(pendingCount.subscribe, pendingCount.getSnapshot)
-  const [name, setName] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [saveFailed, setSaveFailed] = useState(false)
-
-  async function create() {
-    setSaving(true)
-    setSaveFailed(false)
-    let outcome: SubmitOutcome | 'failed'
-    try {
-      outcome = await commands.createProject(name)
-    } catch {
-      outcome = 'failed'
-    }
-    // Only 'queued' is a success; anything else keeps the typed name and says so.
-    if (outcome === 'queued') setName('')
-    else setSaveFailed(true)
-    setSaving(false)
-  }
-
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault()
-    void create()
-  }
 
   function renderList() {
     switch (list.status) {
@@ -121,7 +88,7 @@ function HomeScreen({ store, local, commands, email, projects, pendingCount, syn
         if (list.value.length === 0) return <p>{ptBR.projects.empty}</p>
         // In the view's order: never sorted here.
         return (
-          <ul>
+          <ul className="card project-list">
             {list.value.map((project) => (
               <ProjectRow key={project.id} project={project} local={local} onOpen={() => onOpenProject(project.id)} />
             ))}
@@ -131,31 +98,9 @@ function HomeScreen({ store, local, commands, email, projects, pendingCount, syn
   }
 
   return (
-    <main>
-      <h1>{ptBR.appTitle}</h1>
-      <p>{email === null ? ptBR.home.signedIn : ptBR.home.signedInAs(email)}</p>
-      <button type="button" onClick={() => void store.signOut()}>
-        {ptBR.home.signOut}
-      </button>
-
-      <SyncBar sync={sync} pending={pending} />
-
-      <h2>{ptBR.projects.title}</h2>
+    <main className="page">
+      <h1 className="page__title">{ptBR.projects.title}</h1>
       {renderList()}
-
-      <form onSubmit={handleSubmit}>
-        <label>
-          {ptBR.projects.nameLabel}
-          {/* required only: the name rules (Unicode spaces, control characters, length in
-              code points) belong to the server, and a copy here would drift. */}
-          <input required value={name} onChange={(event) => setName(event.target.value)} />
-        </label>
-        {/* Disabled while saving: a double tap would queue two projects with two ids. */}
-        <button type="submit" disabled={saving}>
-          {ptBR.projects.create}
-        </button>
-      </form>
-      {saveFailed && <p role="alert">{ptBR.projects.saveFailed}</p>}
     </main>
   )
 }

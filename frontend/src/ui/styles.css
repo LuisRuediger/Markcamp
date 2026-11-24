@@ -27,6 +27,7 @@
   --color-alert: #8A2C08;
   --color-captured: #2563C9;
   --color-muted: #6B7280;
+  --color-ok: #2F7D4A;
   --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
   --touch-min: 48px;
   /* The bottom bar, without the iPhone's home indicator area (added where it is used). */
@@ -382,4 +383,293 @@ main.map-screen {
   font-size: 16px;
   font-weight: 700;
   line-height: 1;
+}
+
+/* Projetos, Ajustes and Novo projeto in the design's look (decision T12 of slice F4-2a). New
+   classes only: the element rules above, and the List, Site, Record, New site and sign-in
+   screens, look exactly as before. */
+
+/* The page's background covers the whole screen; the content keeps the 24rem column on wide
+   screens and 16 px gutters on the phone. */
+main.page {
+  max-width: none;
+  margin: 0;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  padding: calc(28px + env(safe-area-inset-top)) max(16px, calc((100% - 24rem) / 2)) 16px;
+  background: var(--color-bg);
+}
+
+/* Above the bar: .with-bottom-nav already pads the bottom by the bar's height. */
+.with-bottom-nav > main.page {
+  min-height: calc(100dvh - var(--bottom-nav-height) - env(safe-area-inset-bottom));
+}
+
+.page__title {
+  margin: 0 0 16px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.section-heading {
+  margin: 0 4px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.card {
+  background: var(--color-surface);
+  border-radius: 18px;
+  box-shadow: 0 2px 10px rgba(22, 32, 26, 0.08);
+}
+
+/* Pill buttons. Secondary: white with a dark border. */
+.pill-button {
+  width: 100%;
+  min-height: var(--touch-min);
+  padding: 0 20px;
+  border: 2px solid var(--color-text);
+  border-radius: 24px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pill-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* "Sair": the outline in the alert colour. */
+.pill-button--alert {
+  border-color: var(--color-alert);
+  color: var(--color-alert);
+}
+
+/* "Confirmar saída": filled. */
+.pill-button--danger {
+  border-color: var(--color-alert);
+  background: var(--color-alert);
+  color: #fff;
+}
+
+.button-pair {
+  display: flex;
+  gap: 10px;
+}
+
+.button-pair > .pill-button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Projetos: the list is the card, one row per project. */
+.project-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-row + .project-row {
+  border-top: 1px solid var(--color-divider);
+}
+
+.project-row__open {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Room under the name for "aguardando envio", which is the button's sibling (the button is
+   named by the project's name alone) and is drawn over this padding. */
+.project-row__open--noted {
+  padding-bottom: 30px;
+}
+
+.project-row__icon {
+  flex: none;
+  color: var(--color-text-secondary);
+}
+
+.project-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 14 px padding + 22 px icon + 12 px gap: under the name. Taps go through to the button. */
+.project-row__note {
+  position: relative;
+  display: block;
+  margin-top: -30px;
+  padding: 0 14px 10px 48px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+}
+
+.project-row__rejection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 14px 48px;
+}
+
+.project-row__rejection p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* Ajustes. */
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.settings-card p {
+  margin: 0;
+}
+
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sync-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.sync-dot--waiting {
+  background: var(--color-honey);
+}
+
+.sync-dot--syncing {
+  background: var(--color-captured);
+}
+
+.sync-dot--offline {
+  background: var(--color-muted);
+}
+
+.sync-dot--synced {
+  background: var(--color-ok);
+}
+
+/* The warning before "Confirmar saída": the install banner's colour. Not an error. */
+.notice {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff4d6;
+  color: var(--color-text);
+}
+
+.app-version {
+  margin: 0 4px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* Novo projeto: the form fills the height, "Criar projeto" at the bottom. */
+main.page--form {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+/* A text button; the class outranks "main > button". */
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  width: auto;
+  min-height: 44px;
+  margin: 0 0 8px;
+  padding: 0 8px 0 0;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.page__form {
+  flex: 1;
+  gap: 16px;
+  margin-bottom: 0;
+}
+
+.field {
+  gap: 6px;
+}
+
+.field__label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+/* 17 px: above the 16 px that keeps iOS from zooming. */
+.field__input {
+  min-height: 52px;
+  padding: 0 14px;
+  border: 2px solid var(--color-text);
+  border-radius: 14px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.page__form [role='alert'] {
+  margin: 0;
+}
+
+.primary-button {
+  margin-top: auto;
+  min-height: 56px;
+  border: none;
+  border-radius: 28px;
+  background: var(--color-honey);
+  color: var(--color-on-honey);
+  font-size: 17px;
+  font-weight: 700;
+  box-shadow: 0 4px 12px rgba(22, 32, 26, 0.18);
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  opacity: 0.6;
+  box-shadow: none;
+  cursor: default;
 }

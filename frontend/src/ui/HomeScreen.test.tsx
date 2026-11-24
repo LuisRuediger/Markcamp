@@ -1,17 +1,12 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, test } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { describe, expect, test, vi } from 'vitest'
 import { createFakeLocalStore } from '../core/fakeLocalStore'
-import { createLocalCommands } from '../core/localCommands'
-import type { SubmitOutcome } from '../core/localSession'
 import type { LocalStore, QueueRejection } from '../core/localStore'
 import { toHistoryInstant, type HistoryInstant } from '../core/historyOrder'
 import type { Project } from '../core/project'
 import { createReadyLocalSession } from './fakeLocalSession'
-import { createFakeStore } from './fakeSessionStore'
 import HomeScreen from './HomeScreen'
 import { ptBR } from './i18n/pt-BR'
-
-const SESSION = { status: 'signedIn', email: 'a@b.c', backend: 'ok' } as const
 
 function instant(value: string): HistoryInstant {
   const result = toHistoryInstant(value)
@@ -27,38 +22,10 @@ function project(id: string, name: string): Project {
 async function setup(prepare: (store: LocalStore) => Promise<void> = async () => {}) {
   const fakeStore = createFakeLocalStore()
   await prepare(fakeStore)
-  const { sync, projects, pendingCount, local } = createReadyLocalSession(fakeStore)
-  let count = 0
-  const commands = createLocalCommands(
-    local,
-    {
-      newId: () => {
-        count += 1
-        return `new-${count}`
-      },
-    },
-    () => new Date('2026-11-12T12:00:00Z'),
-  )
-  const session = createFakeStore(SESSION)
-  render(
-    <HomeScreen
-      store={session}
-      local={local}
-      commands={commands}
-      email="a@b.c"
-      projects={projects}
-      pendingCount={pendingCount}
-      sync={sync}
-      onOpenProject={() => {}}
-    />,
-  )
-  return {
-    session,
-    sync,
-    local,
-    input: screen.getByLabelText<HTMLInputElement>(ptBR.projects.nameLabel),
-    submit: screen.getByRole<HTMLButtonElement>('button', { name: ptBR.projects.create }),
-  }
+  const { projects, local } = createReadyLocalSession(fakeStore)
+  const onOpenProject = vi.fn<(projectId: string) => void>()
+  render(<HomeScreen local={local} projects={projects} onOpenProject={onOpenProject} />)
+  return { local, onOpenProject }
 }
 
 /** Enqueues a createProject and rejects it; returns its seq. */
@@ -66,11 +33,6 @@ async function rejectedProject(store: LocalStore, projectId: string, name: strin
   const item = await store.enqueue({ kind: 'createProject', projectId, name })
   await store.markRejected(item.seq, rejection)
   return item.seq
-}
-
-function typeAndSubmit(input: HTMLInputElement, submit: HTMLButtonElement, name: string) {
-  fireEvent.change(input, { target: { value: name } })
-  fireEvent.click(submit)
 }
 
 async function row(name: string): Promise<HTMLElement> {
@@ -86,20 +48,18 @@ function rowNames(): (string | null)[] {
     .map((item) => item.firstElementChild?.textContent ?? null)
 }
 
-test('the email is shown and the backend line is gone', async () => {
+test('the page heading is "Projetos"; no email, Sair, sync status or create form', async () => {
   await setup()
+  await screen.findByText(ptBR.projects.empty)
 
-  expect(screen.getByText(ptBR.home.signedInAs('a@b.c'))).toBeTruthy()
-  expect(screen.queryByText('Conectado')).toBeNull()
-  expect(screen.queryByText('Servidor indisponível no momento')).toBeNull()
-})
-
-test('Sair calls signOut', async () => {
-  const { session } = await setup()
-
-  fireEvent.click(screen.getByRole('button', { name: ptBR.home.signOut }))
-
-  expect(session.signOut).toHaveBeenCalledOnce()
+  expect(screen.getByRole('heading', { level: 1, name: ptBR.projects.title })).toBeTruthy()
+  expect(screen.queryByRole('heading', { name: ptBR.appTitle })).toBeNull()
+  expect(screen.queryByText(ptBR.home.signedInAs('a@b.c'))).toBeNull()
+  expect(screen.queryByRole('button', { name: ptBR.home.signOut })).toBeNull()
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(screen.queryByRole('button', { name: ptBR.sync.syncNow })).toBeNull()
+  expect(screen.queryByLabelText(ptBR.projects.nameLabel)).toBeNull()
+  expect(screen.queryByRole('button', { name: ptBR.projects.create })).toBeNull()
 })
 
 describe('project list', () => {
@@ -109,6 +69,22 @@ describe('project list', () => {
     expect(screen.getByText(ptBR.projects.loading)).toBeTruthy()
     expect(await screen.findByText(ptBR.projects.empty)).toBeTruthy()
     expect(screen.queryByRole('list')).toBeNull()
+  })
+
+  test('the empty text points at the +', async () => {
+    await setup()
+
+    expect(await screen.findByText('Nenhum projeto ainda. Toque em + para criar o primeiro.')).toBeTruthy()
+  })
+
+  test("a row's button is named by the project's name alone and opens it", async () => {
+    const { onOpenProject } = await setup(async (store) => {
+      await store.enqueue({ kind: 'createProject', projectId: 'p-2', name: 'Offline' })
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Offline' }))
+
+    expect(onOpenProject).toHaveBeenCalledExactlyOnceWith('p-2')
   })
 
   test("confirmed and queued projects come from the merge, in the view's order", async () => {
@@ -131,68 +107,6 @@ describe('project list', () => {
 
     expect(within(await row('Offline')).getByText(ptBR.projects.pendingMark, { exact: false })).toBeTruthy()
     expect(within(await row('Apiário')).queryByText(ptBR.projects.pendingMark, { exact: false })).toBeNull()
-  })
-})
-
-describe('create form', () => {
-  test('the input has required and no maxLength', async () => {
-    const { input } = await setup()
-
-    expect(input.required).toBe(true)
-    expect(input.hasAttribute('maxlength')).toBe(false)
-  })
-
-  test('submit queues a createProject with the typed text and a new id', async () => {
-    const { local, input, submit } = await setup()
-
-    typeAndSubmit(input, submit, '  Sítio  ')
-
-    expect(local.submit).toHaveBeenCalledExactlyOnceWith({ kind: 'createProject', projectId: 'new-1', name: '  Sítio  ' })
-    await waitFor(() => expect(submit.disabled).toBe(false))
-  })
-
-  test('the button is disabled while createProject is in flight', async () => {
-    const { local, input, submit } = await setup()
-    let finish: (outcome: SubmitOutcome) => void = () => {}
-    local.submit.mockReturnValue(new Promise((resolve) => (finish = resolve)))
-
-    typeAndSubmit(input, submit, 'Sítio')
-    expect(submit.disabled).toBe(true)
-    fireEvent.click(submit)
-    expect(local.submit).toHaveBeenCalledOnce()
-
-    finish('queued')
-    await waitFor(() => expect(submit.disabled).toBe(false))
-  })
-
-  test("'queued' clears the field and shows no alert", async () => {
-    const { input, submit } = await setup()
-
-    typeAndSubmit(input, submit, 'Sítio')
-
-    await waitFor(() => expect(input.value).toBe(''))
-    expect(screen.queryByRole('alert')).toBeNull()
-  })
-
-  test("'notReady' shows the alert and keeps the name", async () => {
-    const { local, input, submit } = await setup()
-    local.submit.mockResolvedValue('notReady')
-
-    typeAndSubmit(input, submit, 'Sítio')
-
-    expect((await screen.findByRole('alert')).textContent).toBe(ptBR.projects.saveFailed)
-    expect(input.value).toBe('Sítio')
-  })
-
-  test('a rejected createProject shows the alert and keeps the name', async () => {
-    const { local, input, submit } = await setup()
-    local.submit.mockRejectedValue(new Error('enqueue failed'))
-
-    typeAndSubmit(input, submit, 'Sítio')
-
-    expect((await screen.findByRole('alert')).textContent).toBe(ptBR.projects.saveFailed)
-    expect(input.value).toBe('Sítio')
-    expect(submit.disabled).toBe(false)
   })
 })
 
@@ -269,82 +183,20 @@ describe('rejected row', () => {
   })
 })
 
-describe('sync indicator', () => {
-  test('each kind renders its text, driven through the fake engine', async () => {
-    const { sync } = await setup()
-    const status = () => screen.getByRole('status').textContent
-    await screen.findByText(ptBR.projects.empty)
-
-    expect(status()).toBe(ptBR.sync.synced)
-
-    act(() => sync.setStatus({ phase: 'uploading', lastResult: 'synced' }))
-    expect(status()).toBe(ptBR.sync.syncing)
-
-    act(() => sync.setStatus({ phase: 'idle', lastResult: 'unavailable' }))
-    expect(status()).toBe(ptBR.sync.offline)
-
-    act(() => sync.setStatus({ phase: 'idle', lastResult: 'never' }))
-    expect(status()).toBe(ptBR.sync.notYet)
-  })
-
-  test('with a pending project: never says synced, and offline adds the pending phrase', async () => {
-    const { sync } = await setup(async (store) => {
-      await store.enqueue({ kind: 'createProject', projectId: 'p-1', name: 'Offline' })
-      await store.enqueue({ kind: 'createProject', projectId: 'p-2', name: 'Offline 2' })
+test('a queued bait site does not mark its project as pending', async () => {
+  await setup(async (store) => {
+    await store.replaceProjects([project('p-1', 'Apiário')])
+    await store.enqueue({
+      kind: 'createBaitSite',
+      projectId: 'p-1',
+      baitSiteId: 's-1',
+      name: 'Isca 1',
+      latitude: -27.1,
+      longitude: -49.1,
+      locationAccuracyM: 5,
+      installation: { id: 'e-1', occurredAt: instant('2026-11-12T10:00:00Z') },
     })
-    await screen.findByText('Offline')
-    const status = () => screen.getByRole('status').textContent
-
-    expect(status()).toBe(ptBR.sync.pending(2))
-
-    act(() => sync.setStatus({ phase: 'idle', lastResult: 'unavailable' }))
-    expect(status()).toBe(`${ptBR.sync.offline}. ${ptBR.sync.pending(2)}`)
   })
 
-  test('a queued bait site counts although no project is pending', async () => {
-    await setup(async (store) => {
-      await store.replaceProjects([project('p-1', 'Apiário')])
-      await store.enqueue({
-        kind: 'createBaitSite',
-        projectId: 'p-1',
-        baitSiteId: 's-1',
-        name: 'Isca 1',
-        latitude: -27.1,
-        longitude: -49.1,
-        locationAccuracyM: 5,
-        installation: { id: 'e-1', occurredAt: instant('2026-11-12T10:00:00Z') },
-      })
-    })
-
-    expect(within(await row('Apiário')).queryByText(ptBR.projects.pendingMark, { exact: false })).toBeNull()
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('1 registro aguardando envio'))
-  })
-
-  test('a rejected item alone is not counted: synced', async () => {
-    await setup(async (store) => {
-      await rejectedProject(store, 'p-1', 'Blank', { status: 400, code: 'VALIDATION_FAILED' })
-    })
-
-    await row('Blank')
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe(ptBR.sync.synced))
-  })
-
-  test('the pending phrase is singular for one', () => {
-    expect(ptBR.sync.pending(1)).toBe('1 registro aguardando envio')
-    expect(ptBR.sync.pending(3)).toBe('3 registros aguardando envio')
-  })
-
-  test("Sincronizar agora requests 'full' and is disabled while a pass runs", async () => {
-    const { sync } = await setup()
-    const button = screen.getByRole<HTMLButtonElement>('button', { name: ptBR.sync.syncNow })
-
-    fireEvent.click(button)
-    expect(sync.requestSync).toHaveBeenCalledExactlyOnceWith('full')
-
-    act(() => sync.setStatus({ phase: 'downloading', lastResult: 'synced' }))
-    expect(button.disabled).toBe(true)
-
-    act(() => sync.setStatus({ phase: 'idle', lastResult: 'synced' }))
-    expect(button.disabled).toBe(false)
-  })
+  expect(within(await row('Apiário')).queryByText(ptBR.projects.pendingMark, { exact: false })).toBeNull()
 })
