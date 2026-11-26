@@ -292,22 +292,25 @@ describe('navigation', () => {
     expect(mapShown()).toBe(false)
   })
 
-  test('+ on the map opens New site with the suggested name; Voltar goes back to the map and stops the GPS', async () => {
+  test("+ on the map opens New site with the suggested name; Voltar goes back to the map and stops New site's GPS", async () => {
     const { geo } = await renderReady()
     await openProject()
 
     click(ptBR.sites.newSite)
     expect(newSiteHeading()).toBeTruthy()
     expect(screen.getByLabelText<HTMLInputElement>(ptBR.sites.nameLabel).value).toBe('Isca 3')
-    expect(geo.watch).toHaveBeenCalledOnce()
+    // The map's watch, then New site's own.
+    expect(geo.watch).toHaveBeenCalledTimes(2)
 
     back()
     expect(await screen.findByText('Apiário · 2 iscas')).toBeTruthy()
     expect(newSiteHeading()).toBeNull()
-    expect(geo.activeCount()).toBe(0)
+    // Three watches started (map, New site, map again), and only the map's last one is on.
+    expect(geo.watch).toHaveBeenCalledTimes(3)
+    expect(geo.activeCount()).toBe(1)
   })
 
-  test("'queued' on New site goes back to the map, with the GPS stopped", async () => {
+  test("'queued' on New site goes back to the map, with New site's GPS stopped", async () => {
     const { geo, local } = await renderReady()
     await openProject()
     click(ptBR.sites.newSite)
@@ -317,6 +320,32 @@ describe('navigation', () => {
 
     expect(await screen.findByText('Apiário · 2 iscas')).toBeTruthy()
     expect(local.submit).toHaveBeenCalledOnce()
+    // Only the map's new watch is on.
+    expect(geo.watch).toHaveBeenCalledTimes(3)
+    expect(geo.activeCount()).toBe(1)
+  })
+
+  test('the map watches the position; New site stops it and starts its own, never two at once (slice F4-3)', async () => {
+    const { geo } = await renderReady()
+    expect(geo.watch).not.toHaveBeenCalled()
+
+    await openProject()
+    expect(geo.watch).toHaveBeenCalledOnce()
+    expect(geo.activeCount()).toBe(1)
+
+    click(ptBR.sites.newSite)
+    expect(newSiteHeading()).toBeTruthy()
+    expect(geo.watch).toHaveBeenCalledTimes(2)
+    expect(geo.activeCount()).toBe(1)
+
+    back()
+    await screen.findByText('Apiário · 2 iscas')
+    expect(geo.watch).toHaveBeenCalledTimes(3)
+    expect(geo.activeCount()).toBe(1)
+
+    // Leaving the map for a screen without GPS stops it.
+    click(ptBR.nav.list)
+    await screen.findByText('Isca 2')
     expect(geo.activeCount()).toBe(0)
   })
 
@@ -344,7 +373,8 @@ describe('navigation', () => {
     click(ptBR.projects.newProject)
     expect(newProjectHeading()).toBeTruthy()
     expect(newSiteHeading()).toBeNull()
-    expect(geo.watch).not.toHaveBeenCalled()
+    // The map watched before Projetos; nothing watches on Novo projeto.
+    expect(geo.activeCount()).toBe(0)
     expect(screen.queryByRole('navigation')).toBeNull()
 
     back()

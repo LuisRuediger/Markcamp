@@ -80,6 +80,10 @@ export const ptBR = {
   map: {
     empty: 'Nenhum ponto ainda. Toque em + para criar o primeiro.',
     siteCount: (count: number) => (count === 1 ? '1 isca' : `${count} iscas`),
+    center: 'Centralizar na sua posição',
+    centerSearching: 'Centralizar na sua posição (procurando sinal do GPS)',
+    locationBlocked:
+      'Localização bloqueada. Libere em Ajustes › Privacidade e Segurança › Serviços de Localização › Sites do Safari e abra o MarkCamp de novo.',
   },
   sites: {
     loading: 'Carregando pontos…',

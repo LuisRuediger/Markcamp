@@ -1,13 +1,14 @@
 import * as L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { useEffect, useRef } from 'react'
+import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
+import type { GeoReading } from '../../core/ports'
 import { initialView, type MapMarker, type MapMarkerLook, type MapView } from './mapMarkers'
 
 // The only file that imports leaflet (decision R1 of slice F4-1, enforced in .oxlintrc.json).
 // Leaflet is used directly, without a React wrapper: this component creates the map once in
 // an effect, owns it, and removes it on unmount. React renders the div; Leaflet draws inside
-// it. Markers are kept in sync with the `markers` prop by id, so the map is never recreated
-// because the data changed.
+// it. Markers are kept in sync with the `markers` prop by id, and the device's position with
+// the `position` prop, so the map is never recreated because the data or the position changed.
 
 /** Thunderforest Landscape. {r} is "@2x" on retina screens. Online only until slice F4-4. */
 const TILE_URL = 'https://api.thunderforest.com/landscape/{z}/{x}/{y}{r}.png?apikey='
@@ -22,20 +23,37 @@ const BRAZIL_ZOOM = 4
 /** Fitting every site never zooms closer than this: two sites side by side stay in context. */
 const FIT_MAX_ZOOM = 17
 const FIT_PADDING: L.PointTuple = [48, 48]
+/** Centring on the position never leaves the map farther out than this (decision U5-b of slice F4-3). */
+const CENTER_MIN_ZOOM = 17
+
+/** The position's accuracy circle: #2563EB (--color-position) at 0.35 is rgba(37, 99, 235, 0.35). */
+const ACCURACY_STYLE: L.CircleMarkerOptions = {
+  color: '#2563EB',
+  opacity: 0.35,
+  weight: 1,
+  fillColor: '#3B82F6',
+  fillOpacity: 0.18,
+  interactive: false,
+}
 
 const PULSE_ICON =
-  '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-on-honey)" ' +
-  'stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2.5-6 5 12 2.5-6h6"/></svg>'
-const CHECK_ICON =
   '<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" ' +
-  'stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
+  'stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2.5-6 5 12 2.5-6h6"/></svg>'
+// Captured: a bee on honey (decision U4-b of slice F4-3), so no marker is blue like the position.
+const BEE_ICON =
+  '<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-on-honey)" ' +
+  'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
+  '<ellipse cx="7" cy="10.5" rx="3.4" ry="2.1" transform="rotate(-28 7 10.5)"/>' +
+  '<ellipse cx="17" cy="10.5" rx="3.4" ry="2.1" transform="rotate(28 17 10.5)"/>' +
+  '<circle cx="12" cy="5.6" r="2"/><ellipse cx="12" cy="14.6" rx="4.4" ry="6"/>' +
+  '<path d="M7.8 13.1h8.4M7.9 16.6h8.2"/></svg>'
 
 // Keyed by every look: a new look does not compile until it has its inner content.
 const INNER = {
   empty: '',
   armed: '',
   active: PULSE_ICON,
-  captured: CHECK_ICON,
+  captured: BEE_ICON,
   lost: '',
   invalid: '<span aria-hidden="true">?</span>',
 } satisfies Record<MapMarkerLook, string>
@@ -70,6 +88,27 @@ function decorate(entry: MarkerEntry) {
   element.addEventListener('keydown', entry.onKeyDown)
 }
 
+/**
+ * The device's position: a dot the size of nothing to touch. Above the site markers, but it
+ * takes no touch (interactive: false, so leaflet.css lets touches through to the site under
+ * it) and no focus (keyboard: false: in Leaflet 1.9.4 keyboard is independent of interactive,
+ * and would add tabindex="0" and role="button").
+ */
+const POSITION_ICON = L.divIcon({ className: 'map-position', html: '', iconSize: [20, 20], iconAnchor: [10, 10] })
+
+interface PositionLayers {
+  readonly accuracy: L.Circle
+  readonly dot: L.Marker
+}
+
+/** What a screen can ask of the map: events, not state (decision U5-b of slice F4-3). */
+export interface LeafletMapHandle {
+  /** Centres the map on the point, at the current zoom or CENTER_MIN_ZOOM, whichever is closer. */
+  centerOn(latitude: number, longitude: number): void
+  /** Whether the user has pressed, scrolled or typed on the map since it was created. */
+  touchedByUser(): boolean
+}
+
 export interface LeafletMapProps {
   markers: readonly MapMarker[]
   /** Thunderforest API key, from main.tsx. Goes only into the tile URL; never logged. */
@@ -80,14 +119,19 @@ export interface LeafletMapProps {
    */
   startView: MapView | null
   onSelect: (id: string) => void
-  /** After every move or zoom made on the map (not for the starting view). */
+  /** After every move or zoom after the starting view: the user's, and centerOn's. */
   onViewChange: (view: MapView) => void
+  /** The device's position, drawn as a dot with its accuracy circle; null draws nothing. */
+  position: GeoReading | null
+  ref?: Ref<LeafletMapHandle>
 }
 
-function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange }: LeafletMapProps) {
+function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange, position, ref }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const entriesRef = useRef(new Map<string, MarkerEntry>())
+  const positionRef = useRef<PositionLayers | null>(null)
+  const touchedRef = useRef(false)
   // The latest props, for code that runs inside Leaflet's handlers or only at creation.
   // Updated in the first effect, so the effects below always read this render's values.
   const latest = useRef({ markers, startView, onSelect, onViewChange })
@@ -133,21 +177,49 @@ function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange }: 
           break
       }
     }
-    // After the starting view, so only the user's moves are reported.
+    // After the starting view, so only later moves are reported: the user's and centerOn's.
     map.on('moveend', () => {
       const center = map.getCenter()
       latest.current.onViewChange({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() })
     })
 
+    // Any press, wheel or key on the map counts as the user's (Leaflet's dragstart alone would
+    // miss a pinch). On the container, so marker presses count too.
+    touchedRef.current = false
+    const touched = () => {
+      touchedRef.current = true
+    }
+    container.addEventListener('pointerdown', touched)
+    container.addEventListener('wheel', touched)
+    container.addEventListener('keydown', touched)
+
     mapRef.current = map
     const entries = entriesRef.current
     return () => {
       mapRef.current = null
-      // The markers belonged to this map: the next one starts with none.
+      // The markers and the position belonged to this map: the next one starts with none.
       entries.clear()
+      positionRef.current = null
+      container.removeEventListener('pointerdown', touched)
+      container.removeEventListener('wheel', touched)
+      container.removeEventListener('keydown', touched)
       map.remove()
     }
   }, [tileApiKey])
+
+  useImperativeHandle(
+    ref,
+    (): LeafletMapHandle => ({
+      centerOn(latitude, longitude) {
+        const map = mapRef.current
+        if (map === null) return
+        // The map's maxZoom still holds: setView clamps to it.
+        map.setView([latitude, longitude], Math.max(map.getZoom(), CENTER_MIN_ZOOM))
+      },
+      touchedByUser: () => touchedRef.current,
+    }),
+    [],
+  )
 
   // Markers by id: add the new ones, remove the gone ones, update the changed ones.
   useEffect(() => {
@@ -198,6 +270,33 @@ function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange }: 
     }
     // tileApiKey: a new key recreates the map (above), and the new map starts with no marker.
   }, [markers, tileApiKey])
+
+  // The position: created on the first one, moved on the next ones, removed on null.
+  useEffect(() => {
+    const map = mapRef.current
+    if (map === null) return
+    const layers = positionRef.current
+    if (position === null) {
+      layers?.accuracy.remove()
+      layers?.dot.remove()
+      positionRef.current = null
+      return
+    }
+    const latLng: L.LatLngTuple = [position.latitude, position.longitude]
+    if (layers === null) {
+      // L.circle, in metres: it grows and shrinks with the zoom (an L.circleMarker is in pixels).
+      const accuracy = L.circle(latLng, { ...ACCURACY_STYLE, radius: position.accuracyM }).addTo(map)
+      const dot = L.marker(latLng, { icon: POSITION_ICON, interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map)
+      // The accessible information is on the centre button.
+      dot.getElement()?.setAttribute('aria-hidden', 'true')
+      positionRef.current = { accuracy, dot }
+      return
+    }
+    layers.accuracy.setLatLng(latLng)
+    layers.accuracy.setRadius(position.accuracyM)
+    layers.dot.setLatLng(latLng)
+    // tileApiKey: a new key recreates the map (above), and the new map starts with no position.
+  }, [position, tileApiKey])
 
   return <div ref={containerRef} className="leaflet-map" />
 }

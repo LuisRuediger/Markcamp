@@ -27,7 +27,7 @@ interface AppProps {
   commands: LocalCommands
   /** Read once per run in main.tsx (ADR 0008, decision 11). */
   installed: boolean
-  /** Used only by the New site screen, which starts and stops it. */
+  /** Used by the Map and New site screens, each starting and stopping its own watch. */
   geolocation: GeolocationPort
   /** Thunderforest API key (decision R3 of slice F4-1), passed down to the map only. */
   tileApiKey: string
@@ -211,6 +211,7 @@ function Ready({ store, local, commands, geolocation, tileApiKey, appVersion, em
           key={projectId}
           view={snapshot.project(projectId)}
           tileApiKey={tileApiKey}
+          geolocation={geolocation}
           savedView={saved !== null && saved.projectId === projectId ? saved.view : null}
           onViewChange={(view) => update(() => ({ mapView: { projectId, view } }))}
           onOpenSite={(baitSiteId) => go({ kind: 'site', projectId, baitSiteId, from: 'map' })}
