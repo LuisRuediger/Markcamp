@@ -193,6 +193,35 @@ test('attribution: Thunderforest and OpenStreetMap, no "Leaflet"; no zoom button
   expect(document.querySelector('.leaflet-control-zoom')).toBeNull()
 })
 
+describe('kept offline and the scale (slice F4-4a)', () => {
+  test('every tile is a CORS request (crossorigin=""), so the service worker can keep it', () => {
+    setup()
+
+    const tiles = [...document.querySelectorAll<HTMLImageElement>('img.leaflet-tile')]
+    expect(tiles.length).toBeGreaterThan(0)
+    for (const tile of tiles) {
+      expect(tile.getAttribute('crossorigin')).toBe('')
+    }
+  })
+
+  test('one metric scale bar, still one after the StrictMode double effect', () => {
+    setup()
+
+    const scales = document.querySelectorAll('.leaflet-control-scale')
+    expect(scales).toHaveLength(1)
+    const lines = [...document.querySelectorAll('.leaflet-control-scale-line')]
+    expect(lines).toHaveLength(1)
+    const text = lines[0]?.textContent ?? ''
+    expect(text).toMatch(/\d (m|km)$/)
+    expect(text).not.toMatch(/ft|mi/)
+    // In the bottom left corner.
+    expect(scales[0]?.parentElement?.classList.contains('leaflet-bottom')).toBe(true)
+    expect(scales[0]?.parentElement?.classList.contains('leaflet-left')).toBe(true)
+    // The attribution is still the only other control.
+    expect(document.querySelectorAll('.leaflet-control-attribution')).toHaveLength(1)
+  })
+})
+
 test('unmount removes the map: the container is left empty', () => {
   const { container, unmount } = setup()
   const element = container.querySelector('.leaflet-map')

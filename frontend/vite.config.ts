@@ -4,6 +4,7 @@ import { loadEnv } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vitest/config'
 import { previewAllowedHosts } from './previewHost.ts'
+import { landscapeTileCache } from './tileCache.ts'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => ({
@@ -36,12 +37,14 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
-        // App shell only: the default js/css/html glob plus the bundled font (woff2), and
-        // the manifest and its icons. No runtimeCaching on purpose: API responses are never
-        // cached.
+        // Precached: the app shell only, the default js/css/html glob plus the bundled font
+        // (woff2), and the manifest and its icons. At runtime: one cache, Thunderforest
+        // Landscape tile images only, kept as viewed (ADR 0007 decision 4; see tileCache.ts).
+        // API responses are never cached.
         globPatterns: ['**/*.{js,css,html,woff2}'],
         navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
+        runtimeCaching: [landscapeTileCache],
       },
     }),
   ],

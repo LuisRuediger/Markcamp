@@ -10,7 +10,11 @@ import { initialView, type MapMarker, type MapMarkerLook, type MapView } from '.
 // it. Markers are kept in sync with the `markers` prop by id, and the device's position with
 // the `position` prop, so the map is never recreated because the data or the position changed.
 
-/** Thunderforest Landscape. {r} is "@2x" on retina screens. Online only until slice F4-4. */
+/**
+ * Thunderforest Landscape. {r} is "@2x" on retina screens. The service worker keeps these tiles
+ * as they are viewed, so a place viewed once has a background offline (ADR 0007 decision 10;
+ * the rule is in frontend/tileCache.ts).
+ */
 const TILE_URL = 'https://api.thunderforest.com/landscape/{z}/{x}/{y}{r}.png?apikey='
 
 const ATTRIBUTION =
@@ -152,7 +156,15 @@ function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange, po
       maxZoom: 18,
     })
     L.control.attribution({ prefix: false }).addTo(map)
-    L.tileLayer(TILE_URL + encodeURIComponent(tileApiKey), { attribution: ATTRIBUTION, maxZoom: 18 }).addTo(map)
+    // Metres only, bottom left (decision V7 of slice F4-4a); styled in styles.css.
+    L.control.scale({ position: 'bottomleft', metric: true, imperial: false }).addTo(map)
+    // crossOrigin: a CORS request (img.crossOrigin = ''). Without it the response is opaque
+    // (status 0) and the service worker refuses to keep it (decision V4 of slice F4-4a).
+    L.tileLayer(TILE_URL + encodeURIComponent(tileApiKey), {
+      attribution: ATTRIBUTION,
+      maxZoom: 18,
+      crossOrigin: true,
+    }).addTo(map)
 
     const { markers: first, startView: saved } = latest.current
     if (saved !== null) {

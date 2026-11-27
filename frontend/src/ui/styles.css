@@ -431,6 +431,26 @@ main.map-screen {
   opacity: 0.5;
 }
 
+/* The scale bar (decision V7 of slice F4-4a), on Leaflet's own classes: bottom left, its
+   bottom aligned with the centre button's (30 px). Dark with a white outline instead of
+   Leaflet's grey box, so it reads on the light Landscape and on any other background. */
+.leaflet-map .leaflet-control-scale {
+  margin: 0 0 30px 16px;
+  filter: drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);
+}
+
+.leaflet-map .leaflet-control-scale-line {
+  padding: 0 4px 1px;
+  border: 2px solid var(--color-text);
+  border-top: none;
+  background: none;
+  color: var(--color-text);
+  font: 600 11px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+}
+
 /* "Localização bloqueada…": beside the button, bottom aligned with it (decision U6-b). */
 .map-blocked {
   position: absolute;
