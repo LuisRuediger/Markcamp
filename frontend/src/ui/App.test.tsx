@@ -8,6 +8,7 @@ import { LOADING, type LocalEvent, type LocalStore, type Observable, type Projec
 import type { SessionSnapshot } from '../core/sessionStore'
 import App from './App'
 import { createFakeGeolocation } from './fakeGeolocation'
+import { createFakeHeading } from './fakeHeading'
 import { createFakeLocalSession, createReadyLocalSession } from './fakeLocalSession'
 import { createFakeStore } from './fakeSessionStore'
 import { ptBR } from './i18n/pt-BR'
@@ -28,6 +29,7 @@ function renderApp(
       commands={commands}
       installed={installed}
       geolocation={createFakeGeolocation().port}
+      heading={createFakeHeading().port}
       tileApiKey="key"
       appVersion="abc1234"
     />,
@@ -168,6 +170,7 @@ describe('navigation', () => {
   function renderReadyOver(fakeStore: LocalStore) {
     const ready = createReadyLocalSession(fakeStore)
     const geo = createFakeGeolocation()
+    const heading = createFakeHeading()
     const store = createFakeStore(SIGNED_IN)
     const commands = createLocalCommands(ready.local, { newId: () => 'id-1' }, () => new Date('2026-11-12T12:00:00Z'))
     render(
@@ -177,11 +180,12 @@ describe('navigation', () => {
         commands={commands}
         installed
         geolocation={geo.port}
+        heading={heading.port}
         tileApiKey="key"
         appVersion="abc1234"
       />,
     )
-    return { ...ready, geo }
+    return { ...ready, geo, heading }
   }
 
   /** Signed in and ready over populatedStore(), with nothing stored: the start is Projects. */
@@ -530,6 +534,57 @@ describe('navigation', () => {
     expect(await screen.findByText(ptBR.projects.empty)).toBeTruthy()
     // No current project either: the previous session's project is not one tap away.
     expect(screen.getByRole<HTMLButtonElement>('button', { name: ptBR.nav.map }).disabled).toBe(true)
+  })
+
+  describe('the compass on/off (slice F4-5)', () => {
+    const compass = () => screen.getByRole('button', { name: ptBR.map.compass })
+
+    async function turnOn(heading: ReturnType<typeof createFakeHeading>) {
+      fireEvent.click(compass())
+      await act(async () => {
+        heading.answer('granted')
+      })
+      expect(compass().getAttribute('aria-pressed')).toBe('true')
+      // A heading at once: these tests run on real timers, and on a slow run the 3 s "no
+      // compass" timer would turn it off.
+      act(() => heading.emit(244))
+    }
+
+    test('on in the map, to Lista and back to Mapa: still on, listening again, no second enable()', async () => {
+      const { heading } = await renderReady()
+      await openProject()
+      await turnOn(heading)
+      expect(heading.activeCount()).toBe(1)
+
+      click(ptBR.nav.list)
+      await screen.findByText('Isca 2')
+      expect(heading.activeCount()).toBe(0)
+
+      click(ptBR.nav.map)
+      await screen.findByText('Apiário · 2 iscas')
+      act(() => heading.emit(244))
+      expect(compass().getAttribute('aria-pressed')).toBe('true')
+      expect(heading.activeCount()).toBe(1)
+      expect(heading.enable).toHaveBeenCalledOnce()
+    })
+
+    test('a new session: off', async () => {
+      const { heading, local } = await renderReady()
+      await openProject()
+      await turnOn(heading)
+
+      // The next session opens on its own last project's map.
+      const next = createReadyLocalSession(await populatedStore(PROJECT_ID))
+      const nextSnapshot = next.local.getSnapshot()
+      act(() => {
+        local.setSnapshot({ status: 'none' })
+        local.setSnapshot(nextSnapshot)
+      })
+
+      await screen.findByText('Apiário · 2 iscas')
+      expect(compass().getAttribute('aria-pressed')).toBe('false')
+      expect(heading.activeCount()).toBe(0)
+    })
   })
 
   describe('the start on the last project (slice F4-2b)', () => {

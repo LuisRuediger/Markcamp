@@ -1,24 +1,28 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { useImperativeHandle } from 'react'
+import { useImperativeHandle, useState } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { createFakeLocalStore } from '../core/fakeLocalStore'
+import { trueHeading } from '../core/heading'
 import { toHistoryInstant } from '../core/historyOrder'
 import { createProjectViewCache } from '../core/localMerge'
 import type { LocalBaitSite, LocalEvent, LocalStore } from '../core/localStore'
-import type { GeoReading } from '../core/ports'
+import type { GeoReading, HeadingPermission } from '../core/ports'
 import { createFakeGeolocation } from './fakeGeolocation'
+import { createFakeHeading } from './fakeHeading'
 import { ptBR } from './i18n/pt-BR'
+import { declinationDeg } from './map/declination'
 import type { LeafletMapHandle, LeafletMapProps } from './map/LeafletMap'
 import type { MapView } from './map/mapMarkers'
 import MapScreen from './MapScreen'
 
 // jsdom cannot draw a map, and LeafletMap.test.tsx covers the real one: here it is a double
 // that shows one button per marker, records the props it gets and hands a fake handle to the
-// ref (slice F4-3). The only module mock of slice F4-1.
+// ref (slice F4-3). The only module mock of slice F4-1. Its centre is Blumenau (slice F4-5).
 const leafletMap = vi.hoisted(() => vi.fn<(props: LeafletMapProps) => void>())
 const handle = vi.hoisted(() => ({
   centerOn: vi.fn<LeafletMapHandle['centerOn']>(),
   touchedByUser: vi.fn<LeafletMapHandle['touchedByUser']>(() => false),
+  center: vi.fn<LeafletMapHandle['center']>(() => ({ latitude: -26.92, longitude: -49.07 })),
 }))
 
 vi.mock('./map/LeafletMap', () => ({
@@ -39,6 +43,7 @@ vi.mock('./map/LeafletMap', () => ({
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 const P = 'p-1'
@@ -77,17 +82,27 @@ async function setup(prepare: (store: LocalStore) => Promise<void> = async () =>
   const onOpenSite = vi.fn<(baitSiteId: string) => void>()
   const onViewChange = vi.fn<(view: MapView) => void>()
   const geo = createFakeGeolocation()
-  const result = render(
-    <MapScreen
-      view={createProjectViewCache(store)(P)}
-      tileApiKey="key"
-      savedView={savedView}
-      onViewChange={onViewChange}
-      onOpenSite={onOpenSite}
-      geolocation={geo.port}
-    />,
-  )
-  return { onOpenSite, onViewChange, geo, unmount: result.unmount }
+  const heading = createFakeHeading()
+  const view = createProjectViewCache(store)(P)
+  // The compass's on/off belongs to App: here a state, as App's.
+  function Harness() {
+    const [compassOn, setCompassOn] = useState(false)
+    return (
+      <MapScreen
+        view={view}
+        tileApiKey="key"
+        savedView={savedView}
+        onViewChange={onViewChange}
+        onOpenSite={onOpenSite}
+        geolocation={geo.port}
+        heading={heading.port}
+        compassOn={compassOn}
+        onCompassChange={setCompassOn}
+      />
+    )
+  }
+  const result = render(<Harness />)
+  return { onOpenSite, onViewChange, geo, heading, unmount: result.unmount }
 }
 
 test('loading first, then the header: MarkCamp, the project name and its number of sites', async () => {
@@ -312,5 +327,190 @@ describe('the position (slice F4-3)', () => {
 
       expect(blockedWarning()).toBeNull()
     })
+  })
+})
+
+describe('the compass (slice F4-5)', () => {
+  /** The map's project with one site, shown, then fake timers (they fake animation frames too). */
+  async function shown() {
+    const rendered = await setup((store) => project(store, [site('s-1', 'Isca 1')]))
+    await screen.findByText('Apiário da Serra · 1 isca')
+    vi.useFakeTimers()
+    return rendered
+  }
+
+  const compassButton = () => screen.getByRole('button', { name: ptBR.map.compass })
+  const lastProps = () => leafletMap.mock.calls.at(-1)?.[0]
+  const notice = () => screen.queryByRole('status')
+  const rose = () => {
+    const group = compassButton().querySelector('svg > g')
+    if (group === null) throw new Error('no rose')
+    return group
+  }
+
+  async function tapAndAnswer(rendered: Awaited<ReturnType<typeof shown>>, permission: HeadingPermission) {
+    fireEvent.click(compassButton())
+    await act(async () => {
+      rendered.heading.answer(permission)
+    })
+  }
+
+  /** On, and one heading delivered. */
+  async function delivering(magneticDeg = 244) {
+    const rendered = await shown()
+    await tapAndAnswer(rendered, 'granted')
+    act(() => {
+      rendered.heading.emit(magneticDeg)
+      vi.advanceTimersToNextFrame()
+    })
+    return rendered
+  }
+
+  /** A matchMedia whose "(orientation: landscape)" the test turns. */
+  function stubOrientation() {
+    let landscape = false
+    const listeners = new Set<() => void>()
+    vi.stubGlobal('matchMedia', () => ({
+      get matches() {
+        return landscape
+      },
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    }))
+    return (next: 'landscape' | 'portrait') => {
+      landscape = next === 'landscape'
+      act(() => {
+        for (const listener of [...listeners]) listener()
+      })
+    }
+  }
+
+  test('a button named "Bússola", not pressed; the rose N up', async () => {
+    await shown()
+
+    expect(compassButton().getAttribute('aria-pressed')).toBe('false')
+    expect(rose().getAttribute('transform')).toBe('rotate(0 18 18)')
+  })
+
+  test('a tap calls enable(); granted: pressed, listening', async () => {
+    const rendered = await shown()
+
+    fireEvent.click(compassButton())
+    expect(rendered.heading.enable).toHaveBeenCalledOnce()
+    await act(async () => {
+      rendered.heading.answer('granted')
+    })
+
+    expect(compassButton().getAttribute('aria-pressed')).toBe('true')
+    expect(rendered.heading.activeCount()).toBe(1)
+  })
+
+  test.each([
+    ['denied', ptBR.map.compassDenied],
+    ['unsupported', ptBR.map.compassMissing],
+  ] as const)('%s: the notice, and the button stays off', async (permission, text) => {
+    const rendered = await shown()
+
+    await tapAndAnswer(rendered, permission)
+
+    expect(notice()?.textContent).toBe(text)
+    expect(compassButton().getAttribute('aria-pressed')).toBe('false')
+  })
+
+  test('no heading for 3 s: "Este aparelho não tem bússola." and off again', async () => {
+    const rendered = await shown()
+    await tapAndAnswer(rendered, 'granted')
+
+    act(() => vi.advanceTimersByTime(3000))
+
+    expect(notice()?.textContent).toBe(ptBR.map.compassMissing)
+    expect(compassButton().getAttribute('aria-pressed')).toBe('false')
+    expect(rendered.heading.activeCount()).toBe(0)
+  })
+
+  test('a compass notice hides after 6 s', async () => {
+    const rendered = await shown()
+    await tapAndAnswer(rendered, 'denied')
+
+    act(() => vi.advanceTimersByTime(5999))
+    expect(notice()).not.toBeNull()
+    act(() => vi.advanceTimersByTime(1))
+
+    expect(notice()).toBeNull()
+  })
+
+  test('a compass notice hides on a press on the map, not on a press on the compass button', async () => {
+    const rendered = await shown()
+    await tapAndAnswer(rendered, 'denied')
+
+    fireEvent.pointerDown(compassButton())
+    expect(notice()?.textContent).toBe(ptBR.map.compassDenied)
+    // On the rose inside the button too.
+    fireEvent.pointerDown(rose())
+    expect(notice()).not.toBeNull()
+
+    fireEvent.pointerDown(screen.getByTestId('map'))
+    expect(notice()).toBeNull()
+  })
+
+  test('a new notice replaces the shown one, from 0', async () => {
+    const rendered = await shown()
+    await tapAndAnswer(rendered, 'denied')
+    act(() => vi.advanceTimersByTime(5000))
+
+    await tapAndAnswer(rendered, 'unsupported')
+    act(() => vi.advanceTimersByTime(5000))
+
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(notice()?.textContent).toBe(ptBR.map.compassMissing)
+  })
+
+  test('landscape while on: "Gire o celular…", the rose faded; back to portrait the notice goes at once', async () => {
+    const turn = stubOrientation()
+    const rendered = await delivering()
+
+    turn('landscape')
+
+    expect(notice()?.textContent).toBe(ptBR.map.compassLandscape)
+    expect(compassButton().classList.contains('map-compass--landscape')).toBe(true)
+    expect(compassButton().getAttribute('aria-pressed')).toBe('true')
+    expect(lastProps()?.heading).toBeNull()
+    expect(rendered.heading.activeCount()).toBe(0)
+
+    turn('portrait')
+
+    expect(notice()).toBeNull()
+    expect(compassButton().classList.contains('map-compass--landscape')).toBe(false)
+    expect(rendered.heading.activeCount()).toBe(1)
+  })
+
+  test('the map gets heading null when off, a source when on and delivering', async () => {
+    const rendered = await shown()
+    expect(lastProps()?.heading).toBeNull()
+
+    await tapAndAnswer(rendered, 'granted')
+    expect(lastProps()?.heading).toBeNull()
+
+    act(() => {
+      rendered.heading.emit(244)
+      vi.advanceTimersToNextFrame()
+    })
+    const source = lastProps()?.heading
+    expect(source?.current()).toBeCloseTo(trueHeading(244, declinationDeg(-26.92, -49.07, new Date())), 9)
+
+    fireEvent.click(compassButton())
+    expect(lastProps()?.heading).toBeNull()
+  })
+
+  test('244 magnetic at Blumenau: the rose turns by minus the true heading; off: N up again', async () => {
+    await delivering(244)
+    const expected = trueHeading(244, declinationDeg(-26.92, -49.07, new Date()))
+
+    const match = /^rotate\((-?[\d.]+) 18 18\)$/.exec(rose().getAttribute('transform') ?? '')
+    expect(match).not.toBeNull()
+    expect(Number(match?.[1])).toBeCloseTo(-expected, 2)
+
+    fireEvent.click(compassButton())
+    expect(rose().getAttribute('transform')).toBe('rotate(0 18 18)')
   })
 })

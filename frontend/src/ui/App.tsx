@@ -2,7 +2,7 @@ import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { RecordableType } from '../core/baitSiteRules'
 import type { LocalCommands } from '../core/localCommands'
 import type { LocalSession, LocalSessionSnapshot } from '../core/localSession'
-import type { GeolocationPort } from '../core/ports'
+import type { GeolocationPort, HeadingPort } from '../core/ports'
 import type { SessionIdentitySource, SessionStore } from '../core/sessionStore'
 import BottomNav, { type NavTab } from './BottomNav'
 import HomeScreen from './HomeScreen'
@@ -29,6 +29,8 @@ interface AppProps {
   installed: boolean
   /** Used by the Map and New site screens, each starting and stopping its own watch. */
   geolocation: GeolocationPort
+  /** The compass, used by the Map screen only, which asks for it on the first tap (slice F4-5). */
+  heading: HeadingPort
   /** Thunderforest API key (decision R3 of slice F4-1), passed down to the map only. */
   tileApiKey: string
   /** The build's commit hash (decision T4 of slice F4-2a), passed down to Ajustes only. */
@@ -88,15 +90,26 @@ interface Nav {
    * never stored on the device.
    */
   readonly mapView: { readonly projectId: string; readonly view: MapView } | null
+  /**
+   * The map's compass is on (decision W6 of slice F4-5): kept when the user leaves the map and
+   * comes back. Memory only: reopening the app, or a new session, starts with it off.
+   */
+  readonly compassOn: boolean
 }
 
 /** Where a session opens, decided once per ready snapshot (slice F4-2b). Never a saved map view. */
 function startNav(snapshot: ReadySnapshot, start: Exclude<StartScreen, { readonly kind: 'deciding' }>): Nav {
   switch (start.kind) {
     case 'projects':
-      return { snapshot, screen: PROJECTS, currentProjectId: null, mapView: null }
+      return { snapshot, screen: PROJECTS, currentProjectId: null, mapView: null, compassOn: false }
     case 'map':
-      return { snapshot, screen: { kind: 'map', projectId: start.projectId }, currentProjectId: start.projectId, mapView: null }
+      return {
+        snapshot,
+        screen: { kind: 'map', projectId: start.projectId },
+        currentProjectId: start.projectId,
+        mapView: null,
+        compassOn: false,
+      }
   }
 }
 
@@ -115,7 +128,7 @@ function LocalStatusScreen({ store, children }: { store: AppStore; children: Rea
 
 type ReadyProps = Omit<AppProps, 'installed'> & { email: string | null; snapshot: ReadySnapshot }
 
-function Ready({ store, local, commands, geolocation, tileApiKey, appVersion, email, snapshot }: ReadyProps) {
+function Ready({ store, local, commands, geolocation, heading, tileApiKey, appVersion, email, snapshot }: ReadyProps) {
   const lastProjectId = useSyncExternalStore(snapshot.lastProjectId.subscribe, snapshot.lastProjectId.getSnapshot)
   const projects = useSyncExternalStore(snapshot.projects.subscribe, snapshot.projects.getSnapshot)
   const start = startScreen(lastProjectId, projects)
@@ -212,6 +225,9 @@ function Ready({ store, local, commands, geolocation, tileApiKey, appVersion, em
           view={snapshot.project(projectId)}
           tileApiKey={tileApiKey}
           geolocation={geolocation}
+          heading={heading}
+          compassOn={state.compassOn}
+          onCompassChange={(on) => update(() => ({ compassOn: on }))}
           savedView={saved !== null && saved.projectId === projectId ? saved.view : null}
           onViewChange={(view) => update(() => ({ mapView: { projectId, view } }))}
           onOpenSite={(baitSiteId) => go({ kind: 'site', projectId, baitSiteId, from: 'map' })}
@@ -279,6 +295,7 @@ function SignedIn({
   local,
   commands,
   geolocation,
+  heading,
   tileApiKey,
   appVersion,
   email,
@@ -316,6 +333,7 @@ function SignedIn({
           local={local}
           commands={commands}
           geolocation={geolocation}
+          heading={heading}
           tileApiKey={tileApiKey}
           appVersion={appVersion}
           email={email}
@@ -325,7 +343,7 @@ function SignedIn({
   }
 }
 
-function Body({ store, local, commands, geolocation, tileApiKey, appVersion }: Omit<AppProps, 'installed'>) {
+function Body({ store, local, commands, geolocation, heading, tileApiKey, appVersion }: Omit<AppProps, 'installed'>) {
   const session = useSyncExternalStore(store.subscribe, store.getSnapshot)
 
   switch (session.status) {
@@ -344,6 +362,7 @@ function Body({ store, local, commands, geolocation, tileApiKey, appVersion }: O
           local={local}
           commands={commands}
           geolocation={geolocation}
+          heading={heading}
           tileApiKey={tileApiKey}
           appVersion={appVersion}
           email={session.email}
@@ -352,7 +371,7 @@ function Body({ store, local, commands, geolocation, tileApiKey, appVersion }: O
   }
 }
 
-function App({ store, local, commands, installed, geolocation, tileApiKey, appVersion }: AppProps) {
+function App({ store, local, commands, installed, geolocation, heading, tileApiKey, appVersion }: AppProps) {
   return (
     <>
       {/* In every state: on the iPhone a sign-in done in a Safari tab does not carry into
@@ -363,6 +382,7 @@ function App({ store, local, commands, installed, geolocation, tileApiKey, appVe
         local={local}
         commands={commands}
         geolocation={geolocation}
+        heading={heading}
         tileApiKey={tileApiKey}
         appVersion={appVersion}
       />

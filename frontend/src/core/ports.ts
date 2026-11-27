@@ -98,6 +98,21 @@ export interface GeolocationPort {
   watch(onReading: (reading: GeoReading) => void, onFailure: (failure: GeoFailure) => void): () => void
 }
 
+/** granted: listening may start. denied: the user refused (iOS keeps the answer for the page's life). unsupported: no compass API on this device. */
+export type HeadingPermission = 'granted' | 'denied' | 'unsupported'
+
+/** The device's compass (decision W9 of slice F4-5). */
+export interface HeadingPort {
+  /** Must be called inside a tap; on iOS it asks for permission synchronously, before any await. */
+  enable(): Promise<HeadingPermission>
+  /**
+   * Magnetic heading of the device's top edge, degrees clockwise from magnetic north, in [0, 360).
+   * Callbacks are never called before watch() returns, and never after the returned stop
+   * function is called (it is idempotent).
+   */
+  watch(onHeading: (magneticDeg: number) => void): () => void
+}
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
 export interface TransportRequest {

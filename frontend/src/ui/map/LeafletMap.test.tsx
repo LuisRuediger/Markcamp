@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createRef, StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { GeoReading } from '../../core/ports'
 import LeafletMap, { type LeafletMapHandle, type LeafletMapProps } from './LeafletMap'
 import type { MapMarker } from './mapMarkers'
+import type { HeadingSource } from './useCompass'
 
 // The real Leaflet 1.9.4 in jsdom. jsdom has no layout, so every element measures 0 × 0 and
 // Leaflet would load no tile; the container's size is stubbed to 400 × 400 (jsdom does not
@@ -31,24 +32,31 @@ function setup(
   markers: readonly MapMarker[] = [A, B],
   startView: LeafletMapProps['startView'] = null,
   position: GeoReading | null = null,
+  heading: HeadingSource | null = null,
 ) {
   const onSelect = vi.fn<(id: string) => void>()
   const onViewChange = vi.fn<LeafletMapProps['onViewChange']>()
   const ref = createRef<LeafletMapHandle>()
-  const element = (next: readonly MapMarker[], nextPosition: GeoReading | null) => (
+  let current = { markers, position, heading }
+  const element = () => (
     <StrictMode>
       <LeafletMap
         ref={ref}
-        markers={next}
+        markers={current.markers}
         tileApiKey={KEY}
         startView={startView}
         onSelect={onSelect}
         onViewChange={onViewChange}
-        position={nextPosition}
+        position={current.position}
+        heading={current.heading}
       />
     </StrictMode>
   )
-  const result = render(element(markers, position))
+  const rerender = (change: Partial<typeof current>) => {
+    current = { ...current, ...change }
+    result.rerender(element())
+  }
+  const result = render(element())
   function handle(): LeafletMapHandle {
     if (ref.current === null) throw new Error('no handle')
     return ref.current
@@ -58,8 +66,9 @@ function setup(
     onSelect,
     onViewChange,
     handle,
-    rerenderWith: (next: readonly MapMarker[]) => result.rerender(element(next, position)),
-    rerenderPosition: (next: GeoReading | null) => result.rerender(element(markers, next)),
+    rerenderWith: (next: readonly MapMarker[]) => rerender({ markers: next }),
+    rerenderPosition: (next: GeoReading | null) => rerender({ position: next }),
+    rerenderHeading: (next: HeadingSource | null) => rerender({ heading: next }),
   }
 }
 
@@ -389,4 +398,158 @@ test('a Captured marker has the bee and no check mark (slice F4-3)', () => {
   expect(dot?.querySelectorAll('ellipse')).toHaveLength(3)
   expect(dot?.innerHTML).not.toContain('M5 12.5l4.5 4.5L19 7.5')
   expect(dot?.textContent).not.toContain('✓')
+})
+
+describe('the heading cone (slice F4-5)', () => {
+  const HERE: GeoReading = { latitude: -27.1, longitude: -49.1, accuracyM: 50 }
+
+  /** A HeadingSource the test delivers to, as useCompass's. */
+  function fakeSource(first: number | null = 228) {
+    const listeners = new Set<(trueDeg: number) => void>()
+    let last = first
+    const source: HeadingSource = {
+      subscribe(listener) {
+        listeners.add(listener)
+        return () => {
+          listeners.delete(listener)
+        }
+      },
+      current: () => last,
+    }
+    return {
+      source,
+      listenerCount: () => listeners.size,
+      deliver(trueDeg: number) {
+        last = trueDeg
+        for (const listener of [...listeners]) listener(trueDeg)
+      },
+    }
+  }
+
+  const cones = () => [...document.querySelectorAll<HTMLElement>('.map-heading')]
+
+  function onlyCone(): HTMLElement {
+    const [cone, ...rest] = cones()
+    if (cone === undefined || rest.length > 0) throw new Error('not exactly one cone')
+    return cone
+  }
+
+  const coneRotation = () => onlyCone().querySelector('path')?.getAttribute('transform')
+
+  test('no cone without a source, nor without a position', () => {
+    const { rerenderHeading, rerenderPosition } = setup([A], null, HERE, null)
+    expect(cones()).toHaveLength(0)
+
+    rerenderPosition(null)
+    rerenderHeading(fakeSource().source)
+    expect(cones()).toHaveLength(0)
+  })
+
+  test('both: one cone, hidden from assistive technology, taking no touch and no focus, under the dot', () => {
+    setup([A], null, HERE, fakeSource(228).source)
+
+    const cone = onlyCone()
+    expect(cone.getAttribute('aria-hidden')).toBe('true')
+    expect(cone.classList.contains('leaflet-interactive')).toBe(false)
+    expect(cone.hasAttribute('tabindex')).toBe(false)
+    expect(cone.hasAttribute('role')).toBe(false)
+    // Started right from current(): rotated by plus the true heading, the map has north up.
+    expect(coneRotation()).toBe('rotate(228 60 60)')
+    const dot = document.querySelector<HTMLElement>('.map-position')
+    expect(Number(cone.style.zIndex)).toBeLessThan(Number(dot?.style.zIndex))
+    expect(Number(cone.style.zIndex)).toBeGreaterThan(Number(markerButton('Isca 1, armed').style.zIndex))
+    // The site marker is still the only button.
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+  })
+
+  test('a delivery rotates it', () => {
+    const heading = fakeSource(228)
+    setup([A], null, HERE, heading.source)
+
+    heading.deliver(91.5)
+
+    expect(coneRotation()).toBe('rotate(91.5 60 60)')
+  })
+
+  test('the gradient id is unique per cone', () => {
+    setup([A], null, HERE, fakeSource().source)
+    const first = onlyCone().querySelector('radialGradient')?.id
+    cleanup()
+    setup([A], null, HERE, fakeSource().source)
+    const second = onlyCone().querySelector('radialGradient')?.id
+
+    expect(first).toBeTruthy()
+    expect(second).not.toBe(first)
+    expect(onlyCone().querySelector('path')?.getAttribute('fill')).toBe(`url(#${second})`)
+  })
+
+  test('it moves with the position, on the same element', () => {
+    const { rerenderPosition } = setup([A], null, HERE, fakeSource().source)
+    const cone = onlyCone()
+    const place = () => [cone.style.left, cone.style.top, cone.style.transform].join()
+    const old = place()
+
+    rerenderPosition({ latitude: -27.15, longitude: -49.15, accuracyM: 50 })
+
+    expect(onlyCone()).toBe(cone)
+    expect(place()).not.toBe(old)
+  })
+
+  test('it goes when the source goes null, and when the position goes null', () => {
+    const heading = fakeSource()
+    const { rerenderHeading, rerenderPosition } = setup([A], null, HERE, heading.source)
+
+    rerenderHeading(null)
+    expect(cones()).toHaveLength(0)
+    expect(heading.listenerCount()).toBe(0)
+
+    rerenderHeading(heading.source)
+    expect(cones()).toHaveLength(1)
+    rerenderPosition(null)
+    expect(cones()).toHaveLength(0)
+    // The dot went too, as before.
+    expect(document.querySelectorAll('.map-position')).toHaveLength(0)
+  })
+
+  test('a new source re-subscribes: the old one is left, the new one turns the cone', () => {
+    const first = fakeSource(228)
+    const { rerenderHeading } = setup([A], null, HERE, first.source)
+    expect(first.listenerCount()).toBe(1)
+
+    const second = fakeSource(10)
+    rerenderHeading(second.source)
+
+    expect(first.listenerCount()).toBe(0)
+    expect(second.listenerCount()).toBe(1)
+    expect(coneRotation()).toBe('rotate(10 60 60)')
+    first.deliver(300)
+    expect(coneRotation()).toBe('rotate(10 60 60)')
+    second.deliver(20)
+    expect(coneRotation()).toBe('rotate(20 60 60)')
+  })
+
+  test('the position arriving after the source: the cone starts at the last delivered heading', () => {
+    const heading = fakeSource(228)
+    const { rerenderPosition } = setup([A], null, null, heading.source)
+    heading.deliver(45)
+    expect(cones()).toHaveLength(0)
+
+    rerenderPosition(HERE)
+
+    expect(coneRotation()).toBe('rotate(45 60 60)')
+  })
+})
+
+describe('center() (slice F4-5)', () => {
+  test("the map's current centre; null after unmount", () => {
+    const { handle, unmount } = setup([A, B], { latitude: -27.1, longitude: -49.1, zoom: 15 })
+    const map = handle()
+
+    expect(map.center()).toEqual({ latitude: expect.closeTo(-27.1, 6), longitude: expect.closeTo(-49.1, 6) })
+    map.centerOn(-20.5, -40.5)
+    expect(map.center()).toEqual({ latitude: expect.closeTo(-20.5, 6), longitude: expect.closeTo(-40.5, 6) })
+
+    unmount()
+    expect(map.center()).toBeNull()
+  })
 })

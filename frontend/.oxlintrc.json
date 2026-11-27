@@ -26,7 +26,8 @@
       // src/adapters/**/*.test.ts. Here for src/main.tsx and any file no later override
       // covers; a later override replaces this rule, so adapters and ui restate the ban
       // (core already forbids every package). The same goes for leaflet, allowed only in
-      // src/ui/map/LeafletMap.tsx and its test.
+      // src/ui/map/LeafletMap.tsx and its test, and for geomagnetism, allowed only in
+      // src/ui/map/declination.ts and its test.
       "files": ["src/**"],
       "rules": {
         "no-restricted-imports": ["error", {
@@ -38,6 +39,10 @@
             {
               "group": ["leaflet", "leaflet/**"],
               "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
+            },
+            {
+              "group": ["geomagnetism", "geomagnetism/**"],
+              "message": "geomagnetism only in src/ui/map/declination.ts (and its test): use declinationDeg."
             }
           ]
         }]
@@ -105,6 +110,10 @@
             {
               "group": ["leaflet", "leaflet/**"],
               "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
+            },
+            {
+              "group": ["geomagnetism", "geomagnetism/**"],
+              "message": "geomagnetism only in src/ui/map/declination.ts (and its test): use declinationDeg."
             }
           ]
         }]
@@ -124,6 +133,10 @@
             {
               "group": ["leaflet", "leaflet/**"],
               "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
+            },
+            {
+              "group": ["geomagnetism", "geomagnetism/**"],
+              "message": "geomagnetism only in src/ui/map/declination.ts (and its test): use declinationDeg."
             }
           ]
         }]
@@ -153,6 +166,11 @@
               // screen gets MapMarkers, never Leaflet objects.
               "group": ["leaflet", "leaflet/**"],
               "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
+            },
+            {
+              // One file computes the declination (decision W3 of slice F4-5).
+              "group": ["geomagnetism", "geomagnetism/**"],
+              "message": "geomagnetism only in src/ui/map/declination.ts (and its test): use declinationDeg."
             }
           ]
         }]
@@ -176,6 +194,37 @@
             {
               "group": ["fake-indexeddb", "fake-indexeddb/**"],
               "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
+            },
+            {
+              "group": ["geomagnetism", "geomagnetism/**"],
+              "message": "geomagnetism only in src/ui/map/declination.ts (and its test): use declinationDeg."
+            }
+          ]
+        }]
+      }
+    },
+    {
+      // The one file allowed to import geomagnetism, and its test. This replaces the rule of the
+      // src/ui/** override, so the other ui bans are restated.
+      "files": ["src/ui/map/declination.ts", "src/ui/map/declination.test.ts"],
+      "rules": {
+        "no-restricted-imports": ["error", {
+          "patterns": [
+            {
+              "group": ["**/adapters", "**/adapters/**"],
+              "message": "ui may not import adapters. Wire them in src/main.tsx (ADR 0007)."
+            },
+            {
+              "group": ["dexie", "dexie/**"],
+              "message": "ui may not import dexie. Read through core's LocalStore port (ADR 0008)."
+            },
+            {
+              "group": ["fake-indexeddb", "fake-indexeddb/**"],
+              "message": "fake-indexeddb only in src/adapters/**/*.test.ts: in the bundle it would replace the real IndexedDB."
+            },
+            {
+              "group": ["leaflet", "leaflet/**"],
+              "message": "leaflet only in src/ui/map/LeafletMap.tsx (and its test): use the LeafletMap component."
             }
           ]
         }]

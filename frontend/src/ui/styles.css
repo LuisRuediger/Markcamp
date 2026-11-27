@@ -451,8 +451,63 @@ main.map-screen {
   text-shadow: 0 0 2px #fff, 0 0 2px #fff;
 }
 
-/* "Localização bloqueada…": beside the button, bottom aligned with it (decision U6-b). */
-.map-blocked {
+/* The compass (decision W7 of slice F4-5): top right, in the 76 px the header card leaves free,
+   the same height as the card's top. Its rose turns from LeafletMap's deliveries, written into
+   the SVG: no transition (from 359° to 1° it would spin the whole way round). The layers
+   button goes under it when slice F4-4b comes back. */
+.map-compass {
+  position: absolute;
+  top: calc(12px + env(safe-area-inset-top));
+  right: 12px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 4px 14px rgba(22, 32, 26, 0.18);
+  cursor: pointer;
+}
+
+.map-compass__north {
+  fill: currentColor;
+}
+
+.map-compass__side {
+  fill: var(--color-text-secondary);
+}
+
+.map-compass__south {
+  fill: #9AA39A;
+}
+
+/* On: the active look (the layers button's, V10). */
+.map-compass[aria-pressed='true'] {
+  background: var(--color-text);
+  color: #fff;
+}
+
+.map-compass[aria-pressed='true'] .map-compass__side {
+  fill: #C9D1C9;
+}
+
+.map-compass[aria-pressed='true'] .map-compass__south {
+  fill: #6E7A70;
+}
+
+/* On in landscape (W11): not listening, the rose keeps its last rotation, faded. */
+.map-compass--landscape svg {
+  opacity: 0.55;
+}
+
+/* The notices: "Localização bloqueada…" and the compass's (decisions U6-b and W7), one at a
+   time, beside the centre button, bottom aligned with it. */
+.map-notice {
   position: absolute;
   left: 16px;
   right: 80px;

@@ -3,12 +3,14 @@ import 'leaflet/dist/leaflet.css'
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react'
 import type { GeoReading } from '../../core/ports'
 import { initialView, type MapMarker, type MapMarkerLook, type MapView } from './mapMarkers'
+import type { HeadingSource } from './useCompass'
 
 // The only file that imports leaflet (decision R1 of slice F4-1, enforced in .oxlintrc.json).
 // Leaflet is used directly, without a React wrapper: this component creates the map once in
 // an effect, owns it, and removes it on unmount. React renders the div; Leaflet draws inside
 // it. Markers are kept in sync with the `markers` prop by id, and the device's position with
 // the `position` prop, so the map is never recreated because the data or the position changed.
+// The heading cone follows the `heading` source's deliveries, written straight into its SVG.
 
 /**
  * Thunderforest Landscape. {r} is "@2x" on retina screens. The service worker keeps these tiles
@@ -105,12 +107,46 @@ interface PositionLayers {
   readonly dot: L.Marker
 }
 
+/** Gives every cone its own gradient id: two maps on one page must not share one. */
+let coneCount = 0
+
+/**
+ * The heading cone (decision W8 of slice F4-5): about 50° wide and 56 px long, pointing up
+ * from the centre of a 120 × 120 icon, fading outwards. Rotated by plus the true heading: the
+ * map has north up.
+ */
+function coneIcon(gradientId: string): L.DivIcon {
+  return L.divIcon({
+    className: 'map-heading',
+    html:
+      `<svg aria-hidden="true" width="120" height="120" viewBox="0 0 120 120"><defs>` +
+      `<radialGradient id="${gradientId}" cx="60" cy="60" r="56" gradientUnits="userSpaceOnUse">` +
+      `<stop offset="0" stop-color="#2563EB" stop-opacity="0.55"/>` +
+      `<stop offset="1" stop-color="#3B82F6" stop-opacity="0.06"/></radialGradient></defs>` +
+      `<path class="map-heading__cone" d="M60 60 L36.3 9.2 A56 56 0 0 1 83.7 9.2 Z" fill="url(#${gradientId})"/></svg>`,
+    iconSize: [120, 120],
+    iconAnchor: [60, 60],
+  })
+}
+
+interface ConeLayer {
+  readonly marker: L.Marker
+  /** The path the rotation is written into; null only if Leaflet gave no element. */
+  readonly path: SVGPathElement | null
+}
+
+function rotateCone(cone: ConeLayer, trueDeg: number) {
+  cone.path?.setAttribute('transform', `rotate(${trueDeg} 60 60)`)
+}
+
 /** What a screen can ask of the map: events, not state (decision U5-b of slice F4-3). */
 export interface LeafletMapHandle {
   /** Centres the map on the point, at the current zoom or CENTER_MIN_ZOOM, whichever is closer. */
   centerOn(latitude: number, longitude: number): void
   /** Whether the user has pressed, scrolled or typed on the map since it was created. */
   touchedByUser(): boolean
+  /** The map's current centre; null before the map exists (decision W4 of slice F4-5). */
+  center(): { latitude: number; longitude: number } | null
 }
 
 export interface LeafletMapProps {
@@ -127,14 +163,17 @@ export interface LeafletMapProps {
   onViewChange: (view: MapView) => void
   /** The device's position, drawn as a dot with its accuracy circle; null draws nothing. */
   position: GeoReading | null
+  /** The compass, while on and delivering: a cone on the position. null draws none. */
+  heading: HeadingSource | null
   ref?: Ref<LeafletMapHandle>
 }
 
-function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange, position, ref }: LeafletMapProps) {
+function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange, position, heading, ref }: LeafletMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<L.Map | null>(null)
   const entriesRef = useRef(new Map<string, MarkerEntry>())
   const positionRef = useRef<PositionLayers | null>(null)
+  const coneRef = useRef<ConeLayer | null>(null)
   const touchedRef = useRef(false)
   // The latest props, for code that runs inside Leaflet's handlers or only at creation.
   // Updated in the first effect, so the effects below always read this render's values.
@@ -209,9 +248,10 @@ function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange, po
     const entries = entriesRef.current
     return () => {
       mapRef.current = null
-      // The markers and the position belonged to this map: the next one starts with none.
+      // The markers, the position and the cone belonged to this map: the next one starts with none.
       entries.clear()
       positionRef.current = null
+      coneRef.current = null
       container.removeEventListener('pointerdown', touched)
       container.removeEventListener('wheel', touched)
       container.removeEventListener('keydown', touched)
@@ -229,6 +269,12 @@ function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange, po
         map.setView([latitude, longitude], Math.max(map.getZoom(), CENTER_MIN_ZOOM))
       },
       touchedByUser: () => touchedRef.current,
+      center() {
+        const map = mapRef.current
+        if (map === null) return null
+        const middle = map.getCenter()
+        return { latitude: middle.lat, longitude: middle.lng }
+      },
     }),
     [],
   )
@@ -309,6 +355,50 @@ function LeafletMap({ markers, tileApiKey, startView, onSelect, onViewChange, po
     layers.dot.setLatLng(latLng)
     // tileApiKey: a new key recreates the map (above), and the new map starts with no position.
   }, [position, tileApiKey])
+
+  // The cone: only with both a heading source and a position. Created on the first pair,
+  // moved with the position like the dot, removed when either goes null.
+  useEffect(() => {
+    const map = mapRef.current
+    if (map === null) return
+    const cone = coneRef.current
+    if (heading === null || position === null) {
+      cone?.marker.remove()
+      coneRef.current = null
+      return
+    }
+    const latLng: L.LatLngTuple = [position.latitude, position.longitude]
+    let layer = cone
+    if (layer === null) {
+      coneCount += 1
+      // Above the sites (no zIndexOffset), under the dot (1000); takes no touch and no focus.
+      const marker = L.marker(latLng, {
+        icon: coneIcon(`map-heading-gradient-${coneCount}`),
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 900,
+      }).addTo(map)
+      const element = marker.getElement()
+      element?.setAttribute('aria-hidden', 'true')
+      layer = { marker, path: element?.querySelector('path') ?? null }
+      coneRef.current = layer
+    } else {
+      layer.marker.setLatLng(latLng)
+    }
+    // A late start (the cone is created when the first position comes) or a new source.
+    const now = heading.current()
+    if (now !== null) rotateCone(layer, now)
+    // tileApiKey: a new key recreates the map (above), and the new map starts with no cone.
+  }, [heading, position, tileApiKey])
+
+  // The cone's rotation, on every delivery of the current source.
+  useEffect(() => {
+    if (heading === null) return
+    return heading.subscribe((trueDeg) => {
+      const cone = coneRef.current
+      if (cone !== null) rotateCone(cone, trueDeg)
+    })
+  }, [heading])
 
   return <div ref={containerRef} className="leaflet-map" />
 }

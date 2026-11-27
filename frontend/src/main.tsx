@@ -2,6 +2,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserGeolocation } from './adapters/browserGeolocation'
+import { createBrowserHeading } from './adapters/browserHeading'
 import { createBrowserLifecycle } from './adapters/browserLifecycle'
 import { createBrowserTimers } from './adapters/browserTimers'
 import { createConsoleLogger } from './adapters/consoleLogger'
@@ -59,8 +60,10 @@ if (firebaseConfig.ok && mapConfig.ok) {
   const commands = createLocalCommands(local, createUuidV7Generator(), () => new Date())
   // Once per run: installing opens another window (Android) or another storage (iOS).
   const installed = isInstalledApp()
-  // Nothing is asked of the browser here: the GPS starts only when the New site screen opens.
+  // Nothing is asked of the browser here: the GPS starts when the Map or New site screen
+  // opens, and the compass asks for its permission on its first tap.
   const geolocation = createBrowserGeolocation(navigator.geolocation)
+  const heading = createBrowserHeading(window)
 
   root.render(
     <StrictMode>
@@ -70,6 +73,7 @@ if (firebaseConfig.ok && mapConfig.ok) {
         commands={commands}
         installed={installed}
         geolocation={geolocation}
+        heading={heading}
         tileApiKey={mapConfig.config.tileApiKey}
         appVersion={__APP_VERSION__}
       />

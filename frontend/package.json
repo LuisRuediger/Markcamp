@@ -14,6 +14,7 @@
   "dependencies": {
     "dexie": "^4.4.7",
     "firebase": "^13.2.0",
+    "geomagnetism": "^0.2.0",
     "leaflet": "^1.9.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

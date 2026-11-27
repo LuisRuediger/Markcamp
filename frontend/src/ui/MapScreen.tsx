@@ -1,19 +1,33 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react'
 import type { BaitSiteView, ProjectListEntry, ProjectView } from '../core/localMerge'
 import type { Observable } from '../core/localStore'
-import type { GeolocationPort } from '../core/ports'
+import type { GeolocationPort, HeadingPort } from '../core/ports'
 import { ptBR } from './i18n/pt-BR'
+import CompassButton from './map/CompassButton'
+import { declinationDeg } from './map/declination'
 import LeafletMap, { type LeafletMapHandle } from './map/LeafletMap'
 import { mapMarkers, type MapView } from './map/mapMarkers'
+import { useCompass, type CompassNotice } from './map/useCompass'
 import { usePosition } from './map/usePosition'
 
 // The map of one project, the app's main screen (decision M1-c of slice F4-1). Reads only the
 // project's merged view, like the Project screen; it writes nothing. The bottom bar is not
 // part of it: App puts it under the screens that have it. While it is open (and the page is
-// visible) it watches the device's position, kept in memory only (slice F4-3).
+// visible) it watches the device's position, kept in memory only (slice F4-3), and, while the
+// compass is on, the device's heading (slice F4-5).
 
-/** How long the "location blocked" warning stays after a tap on the centre button. */
-const BLOCKED_WARNING_MS = 6000
+/** How long a notice stays (decisions U6-b of slice F4-3 and W7 of slice F4-5). */
+const NOTICE_MS = 6000
+
+/** One notice at a time, in the same spot; a new one replaces the one shown. */
+type MapNotice = 'locationBlocked' | CompassNotice
+
+const NOTICE_TEXT = {
+  locationBlocked: ptBR.map.locationBlocked,
+  compassDenied: ptBR.map.compassDenied,
+  compassMissing: ptBR.map.compassMissing,
+  compassLandscape: ptBR.map.compassLandscape,
+} satisfies Record<MapNotice, string>
 
 export interface MapScreenProps {
   /** From the local session's per-project cache: the same object while the session lasts. */
@@ -26,6 +40,11 @@ export interface MapScreenProps {
   onOpenSite: (baitSiteId: string) => void
   /** Watched while this screen is mounted and the page is visible. */
   geolocation: GeolocationPort
+  /** Listened to while the compass is on, this screen is mounted, the page visible and the screen in portrait. */
+  heading: HeadingPort
+  /** Kept by App in memory: back to the map in the same run, it is still on. */
+  compassOn: boolean
+  onCompassChange: (on: boolean) => void
 }
 
 /** The design's logo: a honey hexagon with a location pin. Decorative: "MarkCamp" is next to it. */
@@ -67,7 +86,18 @@ type ProjectMapProps = Omit<MapScreenProps, 'view'> & {
   baitSites: readonly BaitSiteView[]
 }
 
-function ProjectMap({ project, baitSites, tileApiKey, savedView, geolocation, onViewChange, onOpenSite }: ProjectMapProps) {
+function ProjectMap({
+  project,
+  baitSites,
+  tileApiKey,
+  savedView,
+  geolocation,
+  heading,
+  compassOn,
+  onCompassChange,
+  onViewChange,
+  onOpenSite,
+}: ProjectMapProps) {
   // Same array while the sites do not change: the map then has nothing to synchronise.
   const markers = useMemo(() => mapMarkers(baitSites), [baitSites])
   const position = usePosition(geolocation)
@@ -89,33 +119,58 @@ function ProjectMap({ project, baitSites, tileApiKey, savedView, geolocation, on
     map.centerOn(reading.latitude, reading.longitude)
   }, [reading, startedWithoutView])
 
-  // The "location blocked" warning: only after a tap on the centre button, for 6 s or until
-  // the next press on the screen outside the button. Each tap shows it again from 0.
-  const [blockedShown, setBlockedShown] = useState(false)
-  const blockedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The notices: "location blocked" only after a tap on the centre button, the compass ones
+  // from the compass. Each for 6 s or until the next press on the screen outside the centre
+  // and compass buttons (their clicks decide), and each shown again from 0.
+  const [notice, setNotice] = useState<MapNotice | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const centerButton = useRef<HTMLButtonElement>(null)
-  const clearBlockedTimer = () => {
-    if (blockedTimer.current !== null) clearTimeout(blockedTimer.current)
-    blockedTimer.current = null
+  const compassButton = useRef<HTMLButtonElement>(null)
+  const clearNoticeTimer = () => {
+    if (noticeTimer.current !== null) clearTimeout(noticeTimer.current)
+    noticeTimer.current = null
   }
-  useEffect(() => clearBlockedTimer, [])
+  useEffect(() => clearNoticeTimer, [])
 
-  function showBlocked() {
-    clearBlockedTimer()
-    setBlockedShown(true)
-    blockedTimer.current = setTimeout(() => {
-      blockedTimer.current = null
-      setBlockedShown(false)
-    }, BLOCKED_WARNING_MS)
+  function showNotice(next: MapNotice) {
+    clearNoticeTimer()
+    setNotice(next)
+    noticeTimer.current = setTimeout(() => {
+      noticeTimer.current = null
+      setNotice(null)
+    }, NOTICE_MS)
+  }
+
+  const compass = useCompass({
+    heading,
+    on: compassOn,
+    onChange: onCompassChange,
+    onNotice: showNotice,
+    declinationAt: (latitude, longitude) => declinationDeg(latitude, longitude, new Date()),
+    center: () => mapRef.current?.center() ?? null,
+  })
+
+  // Back to portrait: "Gire o celular…" goes at once (W11); any other notice stays. Adjusted
+  // while rendering (like App's navigation), not in an effect. Its timer is left to run out:
+  // it only hides what is already hidden, and the next showNotice clears it first.
+  const { landscape } = compass
+  const [seenLandscape, setSeenLandscape] = useState(landscape)
+  if (seenLandscape !== landscape) {
+    setSeenLandscape(landscape)
+    if (!landscape && notice === 'compassLandscape') setNotice(null)
   }
 
   // Capture: Leaflet may stop a press from bubbling, never from being captured.
   function handlePointerDownCapture(event: PointerEvent) {
-    if (!blockedShown) return
-    const button = centerButton.current
-    if (button !== null && event.target instanceof Node && button.contains(event.target)) return
-    clearBlockedTimer()
-    setBlockedShown(false)
+    if (notice === null) return
+    const target = event.target
+    if (target instanceof Node) {
+      for (const button of [centerButton.current, compassButton.current]) {
+        if (button !== null && button.contains(target)) return
+      }
+    }
+    clearNoticeTimer()
+    setNotice(null)
   }
 
   function handleCenter() {
@@ -125,7 +180,7 @@ function ProjectMap({ project, baitSites, tileApiKey, savedView, geolocation, on
         return
       case 'denied':
         // A web app cannot open the iPhone's Settings: the warning says where to go.
-        showBlocked()
+        showNotice('locationBlocked')
         return
       case 'searching':
       case 'unsupported':
@@ -143,6 +198,7 @@ function ProjectMap({ project, baitSites, tileApiKey, savedView, geolocation, on
         onSelect={onOpenSite}
         onViewChange={onViewChange}
         position={reading}
+        heading={compass.source}
       />
       <header className="map-header">
         <Logo />
@@ -153,6 +209,13 @@ function ProjectMap({ project, baitSites, tileApiKey, savedView, geolocation, on
           </p>
         </div>
       </header>
+      <CompassButton
+        buttonRef={compassButton}
+        on={compassOn}
+        landscape={landscape}
+        source={compass.source}
+        onToggle={compass.toggle}
+      />
       {baitSites.length === 0 && <p className="map-empty">{ptBR.map.empty}</p>}
       {/* No GPS on this device: no button at all. */}
       {position.status !== 'unsupported' && (
@@ -167,9 +230,9 @@ function ProjectMap({ project, baitSites, tileApiKey, savedView, geolocation, on
           <Crosshair />
         </button>
       )}
-      {blockedShown && (
-        <p role="status" className="map-blocked">
-          {ptBR.map.locationBlocked}
+      {notice !== null && (
+        <p role="status" className="map-notice">
+          {NOTICE_TEXT[notice]}
         </p>
       )}
     </main>

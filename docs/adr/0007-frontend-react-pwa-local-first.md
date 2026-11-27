@@ -4,6 +4,7 @@
 - **Date:** 2026-11-07
 - **Deciders:** Luis
 - **Amended:** 2026-11-24 (map session: tile provider, map tiles cached as the user views them, satellite online only, compass without map rotation, Leaflet without a React wrapper)
+- **Amended:** 2026-11-27 (compass: true north from the World Magnetic Model; portrait only)
 
 ## Context
 
@@ -140,6 +141,14 @@ Constraints:
     - **The bait site list, sorted by distance from the current GPS position, must work
       without the map**, because offline the map may have no background for areas
       never viewed.
+    - *Amendment (compass, slice F4-5):* **the compass and the heading cone use true
+      north**, the map's. iOS Safari's `webkitCompassHeading` is magnetic (measured on
+      the device, 2026-11-27); the app adds the magnetic declination at the map's
+      centre, computed on the device with the World Magnetic Model through the
+      `geomagnetism` package (WMM2025, valid until 2029-11-13: update the package
+      before then; past it, the model is extrapolated). **They work only in portrait**:
+      Safari reports the heading of the device's top edge and gives no usable screen
+      angle, and the screen cannot be locked to portrait in iOS Safari.
     Revisit when the app is sold (both providers' plans and terms), or when "download
     this area" is needed (paid plan, or self-hosted OpenStreetMap vector tiles).
 11. **The app requests persistent storage** (`navigator.storage.persist()`) and

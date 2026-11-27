@@ -84,6 +84,11 @@ export const ptBR = {
     centerSearching: 'Centralizar na sua posição (procurando sinal do GPS)',
     locationBlocked:
       'Localização bloqueada. Libere em Ajustes › Privacidade e Segurança › Serviços de Localização › Sites do Safari e abra o MarkCamp de novo.',
+    compass: 'Bússola',
+    compassDenied:
+      'Bússola bloqueada. Feche o MarkCamp de vez e abra de novo: no próximo toque o iPhone pergunta outra vez.',
+    compassMissing: 'Este aparelho não tem bússola.',
+    compassLandscape: 'Gire o celular para usar a bússola.',
   },
   sites: {
     loading: 'Carregando pontos…',
